@@ -35,6 +35,32 @@ go test ./...
   - **SVG** vectorial.
   - **GIF** animado del proceso.
 
+## Grabar la construcción de una imagen
+
+En la pestaña **Grabación** se reproduce la imagen armándose forma por forma, y se exporta a MP4 (en el navegador, a 24/30/60 fps y de 720p a 4K). Todo se ve al instante, sin recalcular nada:
+
+- **Dirección:** construir, deconstruir, o construir y deconstruir.
+- **Orden de aparición:**
+  - como las encontró el algoritmo (grandes primero) o al revés;
+  - aleatorio;
+  - por tamaño;
+  - de arriba hacia abajo o de izquierda a derecha;
+  - del centro hacia afuera o de afuera hacia el centro.
+- **Velocidad (curva de *easing*):** cómo se reparten las formas en el tiempo. Un gráfico muestra la curva elegida.
+
+  | Curva | Ritmo |
+  |---|---|
+  | Constante | La misma cantidad de formas por segundo |
+  | Acelera (suave, normal, fuerte) | Empieza lento y va cada vez más rápido |
+  | Frena (suave, normal, fuerte) | Empieza rápido y va frenando |
+  | Lento → rápido → lento | Velocidad en forma de campana |
+  | Rápido → lento → rápido | Campana invertida |
+  | Por impacto visual | Cada forma dura según cuánto mejora la imagen: las que cambian mucho se ven con calma y los detalles pasan rápido |
+- **Efecto de aparición:** de golpe, fundido, crecer, rebote o caer desde arriba, con su duración.
+- **Duración**, pausa al inicio y pausa al final.
+
+El orden de aparición nunca cambia el orden de dibujo, así que el último frame es siempre exactamente la imagen del editor. Lo verifiqué en todas las combinaciones de orden y efecto.
+
 ## Video
 
 1. **Subí un video.** Se abre el editor sobre un frame de la mitad.
@@ -122,6 +148,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 - **Video:**
   - En el servidor, `ffmpeg` decodifica los frames por un pipe y agrega el audio al MP4 exportado.
   - En el navegador (`web/motion.js`, `web/mp4.js`): interpolación, dibujo, WebCodecs, un muxer MP4 propio y la generación de Lottie, sin librerías.
+- **Grabación de imágenes** (`web/build.js`): línea de tiempo con curvas de easing, orden de aparición y efectos. Reutiliza el dibujo y el exportador MP4.
 - **Dependencias Go**:
   - `primitive` y las suyas: `gg`, `freetype`, `resize`, `x/image`.
   - Nada más.

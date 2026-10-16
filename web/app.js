@@ -7,6 +7,10 @@ const state = {
   events: null,
   gen: 0,
   shapes: [],   // SVG fragments of the current run, in order
+  data: [],     // the same shapes as geometry (see encode.go), for recordings
+  scores: [],   // score after each shape (lower = closer to the image)
+  baseScore: 1, // score of the empty canvas
+  image: null,  // { width, height, background } of the current run
   score: 1,
   running: false,
   params: null,
@@ -117,6 +121,10 @@ function render() {
     g.insertAdjacentHTML("beforeend", state.shapes.slice(g.childElementCount, visible).join(""));
   }
   renderStats(visible);
+  if (!state.video) {
+    player.changed(); // the recording uses these shapes
+    if ($("recCurve").value === "impact") recording.drawCurve();
+  }
 }
 
 function renderStats(visible) {
@@ -160,6 +168,10 @@ function connect() {
     const d = JSON.parse(e.data);
     state.gen = d.g;
     state.shapes = d.shapes;
+    state.data = d.data;
+    state.scores = d.scores;
+    state.baseScore = d.baseScore;
+    state.image = { width: d.width, height: d.height, background: d.background };
     state.score = d.score;
     state.running = d.running;
     state.rate = { count: d.shapes.length, time: 0, value: 0 };
@@ -178,6 +190,8 @@ function connect() {
     const d = JSON.parse(e.data);
     if (d.g !== state.gen) return;
     state.shapes[d.i] = d.svg;
+    state.data[d.i] = d.data;
+    state.scores[d.i] = d.score;
     state.score = d.score;
     trackRate();
     scheduleRender();
@@ -207,6 +221,14 @@ function openSession(sid, originalURL) {
   $("drop").hidden = true;
   $("compare").hidden = false;
   $("controls").disabled = false;
+  // Images get a "recording" tab; videos an "animation" one.
+  $("tabs").hidden = false;
+  $("playerTab").textContent = state.video ? "Animación" : "Grabación";
+  $("recordSection").hidden = !!state.video;
+  $("renderEmpty").textContent = state.video
+    ? "Todavía no hay animación. Ajustá los parámetros y tocá “Calcular animación”."
+    : "Esperando las formas del editor…";
+  player.reset();
   showTab("editor");
   connect();
 }
@@ -477,36 +499,50 @@ function resetRenderView() {
   showJob(null);
 }
 
-// ---------- video: player ----------
+// ---------- player ----------
 
-// Plays the computed keyframes, interpolated, on a canvas. The original video
-// (hidden) provides the audio and is the clock when it can play; otherwise a
-// timer is.
+// What the player shows: the video's animation, or the recording of the
+// image being built. A source is { width, height, limit, audio, render(ctx, t, w, h) }.
+function playerSource() {
+  return state.video ? videoSource() : recording.source();
+}
+
+function videoSource() {
+  const a = state.video?.anim;
+  if (!a) return null;
+  // While computing, only the contiguous prefix of keyframes can be played.
+  const kfs = a.keyframes;
+  let n = 0;
+  while (kfs[n]) n++;
+  if (!n) return null;
+  const part = n === kfs.length ? a : { ...a, keyframes: kfs.slice(0, n) };
+  return {
+    width: a.width, height: a.height, audio: true,
+    limit: state.video.job?.state === "done" ? a.duration : Math.max(0, (n - 1) / a.kfps),
+    render: (ctx, t, w, h) => Motion.render(ctx, part, t, $("interp").value, w, h),
+  };
+}
+
+// Plays the current source on a canvas. For videos the original (hidden)
+// provides the audio and is the clock when it can play; otherwise a timer is.
 const player = (() => {
   const canvas = $("player");
   const ctx = canvas.getContext("2d", { alpha: false });
   const video = $("sourceVideo");
   let t = 0, playing = false, last = 0, raf = 0, useVideo = false;
 
-  const anim = () => state.video?.anim;
-  const ready = () => (anim()?.keyframes.filter(Boolean).length ?? 0) > 0;
-  // While computing, only the keyframes we have so far can be played.
-  function limit() {
-    const a = anim();
-    if (!a) return 0;
-    if (state.video.job?.state === "done") return a.duration;
-    let n = 0;
-    while (a.keyframes[n]) n++;
-    return Math.max(0, (n - 1) / a.kfps);
-  }
-
   function draw() {
-    const a = anim();
-    if (!a || !ready() || $("renderView").hidden) return;
+    if ($("renderView").hidden) return;
+    const src = playerSource();
+    $("soundLabel").hidden = !src?.audio;
+    if (!src) {
+      $("renderEmpty").hidden = false;
+      return;
+    }
     $("renderEmpty").hidden = true;
     const box = $("playerBox");
-    const scale = Math.min(box.clientWidth / a.width, box.clientHeight / a.height);
-    const cssW = Math.max(1, Math.floor(a.width * scale)), cssH = Math.max(1, Math.floor(a.height * scale));
+    const scale = Math.min(box.clientWidth / src.width, box.clientHeight / src.height);
+    const cssW = Math.max(1, Math.floor(src.width * scale)), cssH = Math.max(1, Math.floor(src.height * scale));
     const dpr = window.devicePixelRatio || 1;
     const w = Math.round(cssW * dpr), h = Math.round(cssH * dpr);
     if (canvas.width !== w || canvas.height !== h) {
@@ -515,25 +551,22 @@ const player = (() => {
       canvas.style.width = cssW + "px";
       canvas.style.height = cssH + "px";
     }
-    const kfs = a.keyframes;
-    // Only a contiguous prefix can be shown while the rest is computing.
-    let n = 0;
-    while (kfs[n]) n++;
-    Motion.render(ctx, n === kfs.length ? a : { ...a, keyframes: kfs.slice(0, n) }, t, $("interp").value, w, h);
-    const end = limit();
-    $("seek").max = Math.max(end, 0.001);
+    t = Math.min(t, src.limit);
+    src.render(ctx, t, w, h);
+    $("seek").max = Math.max(src.limit, 0.001);
     $("seek").value = t;
-    $("clock").textContent = `${fmtClock(t)} / ${fmtClock(end)}`;
+    $("clock").textContent = `${fmtClock(t)} / ${fmtClock(src.limit)}`;
   }
 
   function tick(now) {
     raf = 0;
     if (!playing) return;
-    const end = limit();
+    const src = playerSource();
+    if (!src) return pause();
     if (useVideo && !video.paused && video.readyState >= 2) t = video.currentTime;
     else t += (now - last) / 1000;
     last = now;
-    if (t >= end) {
+    if (t >= src.limit) {
       t = 0;
       if (useVideo) video.currentTime = 0;
     }
@@ -542,17 +575,20 @@ const player = (() => {
   }
 
   async function play() {
-    if (!ready()) return;
+    const src = playerSource();
+    if (!src) return;
     playing = true;
     $("play").textContent = "❚❚";
     last = performance.now();
     useVideo = false;
-    try {
-      video.muted = !$("sound").checked;
-      video.currentTime = t;
-      await video.play();
-      useVideo = true;
-    } catch { /* unsupported source: keep the timer clock, without audio */ }
+    if (src.audio) {
+      try {
+        video.muted = !$("sound").checked;
+        video.currentTime = t;
+        await video.play();
+        useVideo = true;
+      } catch { /* unsupported source: keep the timer clock, without audio */ }
+    }
     if (!raf) raf = requestAnimationFrame(tick);
   }
 
@@ -574,12 +610,153 @@ const player = (() => {
 
   return {
     toggle: () => (playing ? pause() : play()),
+    play,
     pause,
     reset() { pause(); t = 0; },
-    // New keyframes or job state: redraw (the timer loop does it when playing).
+    // Something changed: redraw (the timer loop does it when playing).
     changed() { if (!playing) draw(); },
     draw,
   };
+})();
+
+// ---------- image: recording the build ----------
+
+const recording = (() => {
+  const fill = (id, entries) =>
+    $(id).replaceChildren(...entries.map(([v, label]) => new Option(label, v)));
+  fill("recDirection", Object.entries(Build.DIRECTIONS));
+  fill("recOrder", Object.entries(Build.ORDERS));
+  fill("recCurve", Object.entries(Build.CURVES).map(([k, c]) => [k, c.label]));
+  fill("recEffect", Object.entries(Build.EFFECTS));
+  $("recCurve").value = "outCubic";
+  $("recEffect").value = "fade";
+
+  const HINTS = {
+    linear: "La misma cantidad de formas por segundo todo el tiempo.",
+    in: "Empieza lento y va cada vez más rápido.",
+    out: "Empieza rápido y va frenando.",
+    inOut: "Arranca lento, acelera en el medio y frena al final.",
+    outIn: "Arranca rápido, se calma en el medio y vuelve a acelerar.",
+    impact: "Cada forma dura según cuánto mejora la imagen: las grandes del principio se ven con calma y los detalles pasan rápido.",
+  };
+  const hintFor = (c) => HINTS[c] ?? HINTS[c.startsWith("inOut") ? "inOut" : c.startsWith("outIn") ? "outIn" : c.startsWith("in") ? "in" : "out"];
+
+  function opts() {
+    const num = (id, lo, hi) => Math.min(hi, Math.max(lo, +$(id).value || 0));
+    return {
+      direction: $("recDirection").value,
+      order: $("recOrder").value,
+      curve: $("recCurve").value,
+      effect: $("recEffect").value,
+      effectTime: +$("recEffectTime").value,
+      duration: num("recDuration", 0.5, 120),
+      holdStart: num("recHoldStart", 0, 10),
+      holdEnd: num("recHoldEnd", 0, 10),
+    };
+  }
+
+  // The shapes shown in the editor, as long as they have all arrived.
+  function image() {
+    if (state.video || !state.id || !state.image) return null;
+    const want = Math.min(state.params?.shapes ?? 0, state.data.length);
+    let n = 0;
+    while (n < want && state.data[n]) n++;
+    if (!n) return null;
+    return { ...state.image, shapes: state.data.slice(0, n), scores: state.scores.slice(0, n), baseScore: state.baseScore };
+  }
+
+  let cache = { key: null, src: null };
+  function source() {
+    const img = image();
+    if (!img) return null;
+    const o = opts();
+    const key = JSON.stringify([state.id, state.gen, img.shapes.length, o]);
+    if (cache.key !== key) {
+      const plan = Build.plan(img, o);
+      cache = { key, src: { ...plan, audio: false, limit: plan.duration } };
+    }
+    return cache.src;
+  }
+
+  // Plot of the speed curve: time across, share of the image built up.
+  function drawCurve() {
+    const c = $("curvePreview"), g = c.getContext("2d");
+    const css = getComputedStyle(document.documentElement);
+    const w = c.width, h = c.height, pad = 14;
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = css.getPropertyValue("--line");
+    g.lineWidth = 1;
+    g.strokeRect(pad, pad, w - 2 * pad, h - 2 * pad);
+    const curve = $("recCurve").value;
+    const ease = curve === "impact" ? source()?.ease ?? ((p) => p) : Build.CURVES[curve].f;
+    g.strokeStyle = css.getPropertyValue("--accent");
+    g.lineWidth = 3;
+    g.beginPath();
+    for (let k = 0; k <= 200; k++) {
+      const p = k / 200;
+      const x = pad + p * (w - 2 * pad), y = h - pad - ease(p) * (h - 2 * pad);
+      k ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.stroke();
+    g.fillStyle = css.getPropertyValue("--muted");
+    g.font = "20px system-ui, sans-serif";
+    g.fillText("tiempo →", w - pad - 90, h - pad - 8);
+    g.fillText("imagen construida ↑", pad + 8, pad + 24);
+    $("curveHint").textContent = hintFor(curve);
+  }
+
+  for (const id of ["recDirection", "recOrder", "recCurve", "recEffect", "recEffectTime", "recDuration", "recHoldStart", "recHoldEnd"]) {
+    $(id).addEventListener("input", () => {
+      $("recEffectTimeOut").textContent = (+$("recEffectTime").value).toFixed(2) + " s";
+      $("recEffectTime").disabled = $("recEffect").value === "none";
+      drawCurve();
+      player.changed();
+    });
+  }
+  $("recEffectTimeOut").textContent = (+$("recEffectTime").value).toFixed(2) + " s";
+
+  $("recPreview").addEventListener("click", () => {
+    showTab("render");
+    player.reset();
+    player.play();
+  });
+
+  let abort = null;
+  $("recCancel").addEventListener("click", () => abort?.abort());
+  $("recExport").addEventListener("click", async () => {
+    const src = source();
+    if (!src) return;
+    const status = $("recStatus");
+    abort = new AbortController();
+    $("recExport").disabled = true;
+    $("recCancel").hidden = false;
+    $("recProgress").hidden = false;
+    const started = performance.now();
+    try {
+      const res = await Motion.encodeMP4(src, {
+        fps: +$("recFps").value,
+        longSide: +$("recSize").value,
+        signal: abort.signal,
+        onProgress: (f) => {
+          $("recProgress").value = f;
+          status.textContent = `Codificando… ${Math.round(f * 100)}%`;
+        },
+      });
+      download(res.blob, "primitive-construccion.mp4");
+      status.textContent = `MP4 listo: ${res.width}×${res.height}, ${res.codec === "avc" ? "H.264" : "VP9"}, ` +
+        `${src.duration.toFixed(1)} s, ${(res.blob.size / 1e6).toFixed(1)} MB, en ${((performance.now() - started) / 1000).toFixed(1)} s.`;
+    } catch (e) {
+      status.textContent = e.name === "AbortError" ? "Exportación cancelada." : "Error: " + e.message;
+    } finally {
+      abort = null;
+      $("recExport").disabled = false;
+      $("recCancel").hidden = true;
+      $("recProgress").hidden = true;
+    }
+  });
+
+  drawCurve();
+  return { source, drawCurve };
 })();
 
 // ---------- video: exporting the animation ----------

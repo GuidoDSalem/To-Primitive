@@ -159,9 +159,17 @@ const Motion = (() => {
     throw new Error("el navegador no puede codificar H.264 ni VP9 a este tamaño");
   }
 
-  // Encode the whole animation. onProgress(fraction); signal aborts.
-  async function exportMP4(anim, { mode, fps, longSide, onProgress, signal }) {
-    const [w, h] = outputSize(anim, longSide);
+  // Encode the keyframe animation. onProgress(fraction); signal aborts.
+  function exportMP4(anim, opts) {
+    return encodeMP4({
+      width: anim.width, height: anim.height, duration: anim.duration,
+      render: (ctx, t, w, h) => render(ctx, anim, t, opts.mode, w, h),
+    }, opts);
+  }
+
+  // Encode any source { width, height, duration, render(ctx, t, w, h) }.
+  async function encodeMP4(src, { fps, longSide, onProgress, signal }) {
+    const [w, h] = outputSize(src, longSide);
     const { kind, config } = await pickEncoder(w, h, fps);
     const samples = [];
     let description = null;
@@ -179,12 +187,12 @@ const Motion = (() => {
 
     const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(w, h) : Object.assign(document.createElement("canvas"), { width: w, height: h });
     const ctx = canvas.getContext("2d", { alpha: false });
-    const total = Math.max(1, Math.ceil(anim.duration * fps));
+    const total = Math.max(1, Math.ceil(src.duration * fps));
     try {
       for (let f = 0; f < total; f++) {
         if (signal?.aborted) throw new DOMException("cancelado", "AbortError");
         if (failure) throw failure;
-        render(ctx, anim, f / fps, mode, w, h);
+        src.render(ctx, f / fps, w, h);
         const frame = new VideoFrame(canvas, { timestamp: Math.round((f * 1e6) / fps), duration: Math.round(1e6 / fps) });
         encoder.encode(frame, { keyFrame: f % Math.round(fps * 2) === 0 });
         frame.close();
@@ -321,5 +329,5 @@ const Motion = (() => {
     return { v: "5.7.4", fr: fps, ip: 0, op, w, h, nm: "To-Primitive", ddd: 0, assets: [], layers };
   }
 
-  return { shapesAt, render, outputSize, exportMP4, lottie };
+  return { shapesAt, render, drawShape, outputSize, exportMP4, encodeMP4, lottie };
 })();

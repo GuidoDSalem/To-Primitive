@@ -49,6 +49,7 @@ func clampInt(x, lo, hi int) int {
 // appended, so readers may keep a sub-slice after releasing the lock.
 type shapeRec struct {
 	SVG   string
+	Data  []float64 // encodeShape form, for animating it in the browser
 	Shape primitive.Shape
 	Color primitive.Color
 	Score float64
@@ -61,6 +62,7 @@ type run struct {
 	bg     primitive.Color
 	shapes []shapeRec
 	score  float64
+	base   float64 // score of the empty canvas, before any shape
 	cancel context.CancelFunc
 	wake   chan struct{}
 }
@@ -138,7 +140,7 @@ func (s *Session) startRunLocked() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.gen++
-	r := &run{gen: s.gen, w: b.Dx(), h: b.Dy(), bg: bg, score: model.Score, cancel: cancel, wake: make(chan struct{}, 1)}
+	r := &run{gen: s.gen, w: b.Dx(), h: b.Dy(), bg: bg, score: model.Score, base: model.Score, cancel: cancel, wake: make(chan struct{}, 1)}
 	s.run = r
 	s.running = false
 	s.hub.broadcast("snapshot", s.snapshotLocked())
@@ -192,7 +194,7 @@ func (s *Session) loop(ctx context.Context, r *run, model *primitive.Model, p Pa
 		for i := before; i < len(model.Shapes); i++ {
 			rec := recFromModel(model, i)
 			r.shapes = append(r.shapes, rec)
-			s.hub.broadcast("shape", map[string]any{"g": r.gen, "i": len(r.shapes) - 1, "svg": rec.SVG, "score": rec.Score})
+			s.hub.broadcast("shape", map[string]any{"g": r.gen, "i": len(r.shapes) - 1, "svg": rec.SVG, "data": rec.Data, "score": rec.Score})
 		}
 		r.score = model.Score
 		s.mu.Unlock()
@@ -202,13 +204,15 @@ func (s *Session) loop(ctx context.Context, r *run, model *primitive.Model, p Pa
 func (s *Session) snapshotLocked() map[string]any {
 	r := s.run
 	svgs := make([]string, len(r.shapes))
+	data := make([][]float64, len(r.shapes))
+	scores := make([]float64, len(r.shapes))
 	for i, rec := range r.shapes {
-		svgs[i] = rec.SVG
+		svgs[i], data[i], scores[i] = rec.SVG, rec.Data, rec.Score
 	}
 	return map[string]any{
 		"g": r.gen, "width": r.w, "height": r.h,
 		"background": fmt.Sprintf("#%02x%02x%02x", r.bg.R, r.bg.G, r.bg.B),
-		"params":     s.params, "shapes": svgs, "score": r.score, "running": s.running,
+		"params":     s.params, "shapes": svgs, "data": data, "scores": scores, "baseScore": r.base, "score": r.score, "running": s.running,
 	}
 }
 

@@ -11,7 +11,9 @@ import (
 func recFromModel(model *primitive.Model, i int) shapeRec {
 	c := model.Colors[i]
 	attrs := fmt.Sprintf(`fill="#%02x%02x%02x" fill-opacity="%.3f"`, c.R, c.G, c.B, float64(c.A)/255)
-	return shapeRec{SVG: model.Shapes[i].SVG(attrs), Shape: model.Shapes[i], Color: c, Score: model.Scores[i]}
+	rec := shapeRec{SVG: model.Shapes[i].SVG(attrs), Shape: model.Shapes[i], Color: c, Score: model.Scores[i]}
+	rec.Data = encodeShape(rec, true, nil)
+	return rec
 }
 
 // rebind copies a shape and points it at another worker. Shapes keep a

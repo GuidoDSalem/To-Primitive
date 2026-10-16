@@ -41,6 +41,7 @@ fieldset:disabled { opacity: .45; }
 
 .field { margin-bottom: 14px; }
 .row > .field { margin-bottom: 0; }
+#curvePreview { display: block; width: 100%; height: auto; aspect-ratio: 14 / 5; margin-top: 8px; border-radius: 6px; background: var(--bg); }
 .field > label:first-child { display: flex; justify-content: space-between; margin-bottom: 4px; }
 output { color: var(--accent); font-variant-numeric: tabular-nums; }
 

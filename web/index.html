@@ -89,6 +89,68 @@
         </div>
       </section>
 
+      <section id="recordSection" hidden>
+        <h2>Grabar construcción</h2>
+        <div class="field">
+          <label for="recDirection">Dirección</label>
+          <select id="recDirection"></select>
+        </div>
+        <div class="field">
+          <label for="recOrder">Orden de aparición</label>
+          <select id="recOrder"></select>
+        </div>
+        <div class="field">
+          <label for="recCurve">Velocidad (curva de easing)</label>
+          <select id="recCurve"></select>
+          <canvas id="curvePreview" width="560" height="200" title="Horizontal: tiempo. Vertical: cuánto de la imagen ya está construido."></canvas>
+          <p class="hint" id="curveHint"></p>
+        </div>
+        <div class="field">
+          <label for="recEffect">Efecto de aparición</label>
+          <select id="recEffect"></select>
+        </div>
+        <div class="field">
+          <label for="recEffectTime">Duración del efecto <output id="recEffectTimeOut"></output></label>
+          <input id="recEffectTime" type="range" min="0.05" max="3" step="0.05" value="0.6">
+        </div>
+        <div class="row">
+          <div class="field wide">
+            <label for="recDuration">Duración (s)</label>
+            <input id="recDuration" type="number" min="0.5" max="120" step="0.5" value="6">
+          </div>
+          <div class="field wide">
+            <label for="recHoldStart">Pausa inicio</label>
+            <input id="recHoldStart" type="number" min="0" max="10" step="0.25" value="0.5">
+          </div>
+          <div class="field wide">
+            <label for="recHoldEnd">Pausa final</label>
+            <input id="recHoldEnd" type="number" min="0" max="10" step="0.25" value="2">
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <div class="field wide">
+            <label for="recFps">FPS</label>
+            <select id="recFps"><option>24</option><option selected>30</option><option>60</option></select>
+          </div>
+          <div class="field wide">
+            <label for="recSize">Resolución</label>
+            <select id="recSize">
+              <option value="1280">720p</option>
+              <option value="1920" selected>1080p</option>
+              <option value="2560">1440p</option>
+              <option value="3840">4K</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="recPreview" class="wide">Ver grabación</button>
+          <button id="recExport" class="wide primary">Exportar MP4</button>
+        </div>
+        <button id="recCancel" class="wide" hidden>Cancelar exportación</button>
+        <progress id="recProgress" max="1" value="0" hidden></progress>
+        <p id="recStatus" class="hint">Usa las formas visibles en el editor. Los cambios se ven al instante en la pestaña “Grabación”.</p>
+      </section>
+
       <section id="renderSection" hidden>
         <h2>Animación</h2>
         <div class="field">
@@ -171,7 +233,7 @@
   <main id="stage">
     <nav id="tabs" hidden>
       <button data-tab="editor" class="on">Editor</button>
-      <button data-tab="render">Animación</button>
+      <button data-tab="render" id="playerTab">Animación</button>
     </nav>
     <div id="drop">
       <p><strong>Arrastrá una imagen acá</strong><br>o usá “Subir imagen…”</p>
@@ -189,7 +251,7 @@
         <button id="play" title="Reproducir / pausar (barra espaciadora)">▶</button>
         <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
         <span id="clock">0:00 / 0:00</span>
-        <label class="check"><input id="sound" type="checkbox" checked> Audio</label>
+        <label class="check" id="soundLabel"><input id="sound" type="checkbox" checked> Audio</label>
       </div>
       <p id="renderEmpty" class="empty">Todavía no hay animación. Ajustá los parámetros y tocá “Calcular animación”.</p>
       <video id="sourceVideo" preload="auto" playsinline hidden></video>
@@ -199,6 +261,7 @@
 
   <script src="mp4.js"></script>
   <script src="motion.js"></script>
+  <script src="build.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
