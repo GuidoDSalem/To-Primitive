@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>To-Primitive</h1>
+      <p class="sub">Imágenes reconstruidas con formas geométricas</p>
+    </header>
+
+    <section>
+      <h2>Imagen</h2>
+      <label class="button wide">
+        <input id="file" type="file" accept="image/*" hidden>
+        Subir imagen…
+      </label>
+    </section>
+
+    <fieldset id="controls" disabled>
+      <section>
+        <h2>Formas</h2>
+        <div class="field">
+          <label for="shapes">Cantidad <output id="shapesOut"></output></label>
+          <input id="shapes" type="range" min="1" max="2000" value="200">
+          <p class="hint">Cambiarla no reinicia: agrega o quita formas en vivo.</p>
+        </div>
+        <div class="field">
+          <label>Tipo</label>
+          <div id="mode" class="chips">
+            <button data-value="1">Triángulo</button>
+            <button data-value="2">Rectángulo</button>
+            <button data-value="5">Rect. rotado</button>
+            <button data-value="3">Elipse</button>
+            <button data-value="7">Elipse rotada</button>
+            <button data-value="4">Círculo</button>
+            <button data-value="6">Bézier</button>
+            <button data-value="8">Polígono</button>
+            <button data-value="0">Combinado</button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Algoritmo</h2>
+        <div class="field">
+          <label for="alpha">Opacidad <output id="alphaOut"></output></label>
+          <input id="alpha" type="range" min="1" max="255" value="128">
+          <label class="check"><input id="alphaAuto" type="checkbox"> Automática (por forma)</label>
+        </div>
+        <div class="field">
+          <label for="repeat">Repetición <output id="repeatOut"></output></label>
+          <input id="repeat" type="range" min="0" max="10" value="0">
+          <p class="hint">Formas extra por iteración con búsqueda reducida.</p>
+        </div>
+        <div class="field">
+          <label for="inputSize">Resolución de trabajo <output id="inputSizeOut"></output></label>
+          <input id="inputSize" type="range" min="64" max="512" step="16" value="256">
+          <p class="hint">Más alta = más detalle, pero más lento.</p>
+        </div>
+        <div class="field">
+          <label for="background">Fondo</label>
+          <div class="row">
+            <input id="background" type="color" value="#000000">
+            <label class="check"><input id="bgAuto" type="checkbox" checked> Color promedio</label>
+          </div>
+        </div>
+        <div class="row">
+          <button id="pause" class="wide">Pausar</button>
+          <button id="restart" class="wide" title="Nueva corrida con los mismos parámetros">Regenerar</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Exportar</h2>
+        <div class="field">
+          <label for="exportSize">Tamaño (lado mayor, px)</label>
+          <input id="exportSize" type="number" min="16" max="8192" value="1024">
+        </div>
+        <div class="row">
+          <button data-export="png" class="wide">PNG</button>
+          <button data-export="svg" class="wide">SVG</button>
+          <button data-export="gif" class="wide">GIF</button>
+        </div>
+      </section>
+    </fieldset>
+
+    <footer id="stats">Sin imagen</footer>
+  </aside>
+
+  <main id="stage">
+    <div id="drop">
+      <p><strong>Arrastrá una imagen acá</strong><br>o usá “Subir imagen…”</p>
+    </div>
+    <div id="view" hidden>
+      <svg id="out" xmlns="http://www.w3.org/2000/svg">
+        <defs><clipPath id="clip"><rect id="clipRect" x="0" y="0"/></clipPath></defs>
+        <g clip-path="url(#clip)"><rect id="bg" x="0" y="0"/><g id="shapesG" transform="translate(0.5 0.5)"></g></g>
+      </svg>
+      <img id="original" alt="Original" hidden>
+    </div>
+    <button id="compare" hidden title="Mantené apretado (o la barra espaciadora) para ver el original">Ver original</button>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
