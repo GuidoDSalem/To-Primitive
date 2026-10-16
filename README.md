@@ -102,6 +102,28 @@ Con **Usar cámara (en vivo)**, la webcam se transforma en formas en tiempo real
 - **Dibujo en el navegador:** se dibuja un instante un poco atrasado (latencia más un intervalo entre keyframes), interpolando con el mismo motor que el video. Todos los cuadros de pantalla cambian, aunque los keyframes lleguen a 10–15 por segundo.
 - **Parámetros en vivo:** formas, tipo, opacidad, resolución, fondo, seguimiento e interpolación se pueden cambiar mientras corre.
 
+### Flujo óptico
+
+Activado por defecto, en vivo y en video. Antes de cada keyframe se estima **hacia dónde se movió cada zona** de la imagen, y las formas del keyframe anterior se trasladan con ese movimiento: cada vértice según el flujo en su posición, así que también pueden estirarse o girar.
+
+- **Estimación** (`flow.go`, sin dependencias):
+  - *Block matching* jerárquico: celdas de 8 px buscadas primero a 1/4 de tamaño (movimientos grandes) y refinadas en cada nivel, con precisión subpíxel y filtro de mediana.
+  - Las zonas lisas toman el movimiento de sus vecinas.
+  - Cuesta ~3 ms por keyframe a 128 px.
+  - Con desplazamientos conocidos (`TestFlowFindsShifts`) acierta hasta 12 px, con error menor a 0.02 px.
+- **Refinamiento que no deshace el seguimiento:** después de moverlas con el flujo, el hill climbing refina las formas, pero alejarlas de donde las puso el flujo tiene un costo, proporcional a la distancia al cuadrado. Sin ese costo, las mutaciones al azar de primitive deshacían buena parte del seguimiento.
+- **Medido** (`TestLiveFlowQuality`, paneo rápido de ~8 px por keyframe, mismo presupuesto, promedio de 3 corridas):
+
+  | Configuración | Error contra el frame | Distancia de cada forma al movimiento real |
+  |---|---|---|
+  | 30 pasos, 100 ms, sin flujo | 5.56 | 20.2 px |
+  | 30 pasos, 100 ms, con flujo | 5.62 | 7.4 px |
+  | 5 pasos, 40 ms, sin flujo | 7.29 | 17.4 px |
+  | 5 pasos, 40 ms, con flujo | 7.39 | 8.7 px |
+
+  La fidelidad queda prácticamente igual (la variación entre corridas es de ±0.3), y **las formas siguen el movimiento 2–2.7 veces mejor**: se deslizan con el objeto en vez de saltar.
+- **Se puede apagar** con la casilla "Flujo óptico", tanto en vivo como en la sección de video.
+
 **Medido en 4 núcleos**, solo el cálculo del servidor, con frames de video real (`LIVE_BENCH=video.mp4 go test -run TestLiveThroughput -v`):
 
 | Formas | Resolución | Keyframes/s |
@@ -209,6 +231,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 - **En vivo:**
   - `live.go` maneja la sesión y el bucle de frames.
   - `budget.go` arma los keyframes con presupuesto de tiempo, mapa de cambios y búsqueda rápida.
+  - `flow.go` estima el flujo óptico y mueve las formas con él (también se usa en video).
   - `web/live.js` se encarga de la cámara, el dibujo con retraso y la grabación.
 - **Dependencias Go**:
   - `primitive` y las suyas: `gg`, `freetype`, `resize`, `x/image`.
@@ -224,12 +247,12 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/videos/{id}/frame?t=1.5&size=320` | Frame crudo en JPEG (previsualización) |
 | `POST /api/videos/{id}/frames` | Crea una sesión de edición sobre el frame `t` |
 | `GET /api/videos/{id}/events` | Stream SSE: `job` (progreso), `animation` (dimensiones y fondo) y `keyframe` (cada keyframe calculado) |
-| `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`) |
+| `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`, `flow`) |
 | `DELETE /api/videos/{id}/compute` | Cancela el cálculo |
 | `GET /api/videos/{id}/keyframes` | Todos los keyframes calculados hasta el momento (JSON) |
 | `GET /api/videos/{id}/source` | El video original (audio y reloj del reproductor) |
 | `POST /api/videos/{id}/mux` | Recibe un MP4 sin audio y lo devuelve con el audio original |
-| `POST /api/live` | Crea una sesión en vivo (parámetros + `adapt`, `budget` en ms) |
+| `POST /api/live` | Crea una sesión en vivo (parámetros + `adapt`, `budget` en ms, `flow`) |
 | `GET /api/live/{id}/events` | Stream SSE: `ready` (mandá un frame), `animation`, `keyframe` y `stats` |
 | `POST /api/live/{id}/frame` | Un frame de la cámara (JPEG); header `X-Capture-Time` con el reloj del navegador |
 | `PUT /api/live/{id}/params` | Cambia los parámetros (`restart: true` empieza de nuevo) |

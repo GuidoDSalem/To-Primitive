@@ -109,6 +109,7 @@
             <option value="step">Sin interpolar</option>
           </select>
         </div>
+        <label class="check"><input id="liveFlow" type="checkbox" checked> Flujo óptico (las formas siguen el movimiento)</label>
         <div class="row">
           <label class="check"><input id="liveMirror" type="checkbox" checked> Espejo</label>
           <label class="check"><input id="liveShowCam" type="checkbox" checked> Ver cámara</label>
@@ -232,6 +233,7 @@
         <div class="field">
           <label for="adapt">Seguimiento del movimiento <output id="adaptOut"></output></label>
           <input id="adapt" type="range" min="0" max="300" step="10" value="60">
+          <label class="check"><input id="videoFlow" type="checkbox" checked> Flujo óptico (las formas siguen el movimiento)</label>
           <p class="hint">Cada keyframe parte de las formas del anterior. Más alto = las formas siguen mejor el movimiento; 0 = quedan fijas y solo cambian de color.</p>
         </div>
         <div class="row">

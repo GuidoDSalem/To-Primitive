@@ -14,14 +14,15 @@ import (
 // LiveOpts are the live settings, on top of the shape Params.
 type LiveOpts struct {
 	Params
-	Adapt    int `json:"adapt"`  // hill-climb steps per adapted shape
-	BudgetMS int `json:"budget"` // time allowed per keyframe
+	Adapt    int  `json:"adapt"`  // hill-climb steps per adapted shape
+	BudgetMS int  `json:"budget"` // time allowed per keyframe
+	Flow     bool `json:"flow"`   // move shapes with the optical flow first
 }
 
 func defaultLiveOpts() LiveOpts {
 	p := defaultParams()
 	p.Shapes, p.InputSize = 100, 128
-	return LiveOpts{Params: p, Adapt: 30, BudgetMS: 120}
+	return LiveOpts{Params: p, Adapt: 30, BudgetMS: 120, Flow: true}
 }
 
 func (o *LiveOpts) clamp() {
@@ -199,8 +200,19 @@ func (s *LiveSession) loop(ctx context.Context) {
 			})
 		}
 
+		var flowMS float64
+		start2 := prev
+		bs.stick = 0
+		if o.Flow {
+			bs.stick = stickFor(o.Adapt, max(w, h))
+		}
+		if o.Flow && prev != nil {
+			t0 := time.Now()
+			start2 = followFlow(prev, estimateFlow(prevImg, img))
+			flowMS = float64(time.Since(t0).Microseconds()) / 1000
+		}
 		model := primitive.NewModel(img, bg, max(w, h), numWorkers)
-		fresh, st := buildFrameBudget(model, o.Params, prev, o.Adapt, newChangeMap(prevImg, img), deadline, &bs)
+		fresh, st := buildFrameBudget(model, o.Params, start2, o.Adapt, newChangeMap(prevImg, img), deadline, &bs)
 		cur := make([]shapeRec, len(model.Shapes))
 		enc := make([][]float64, len(model.Shapes))
 		for i := range model.Shapes {
@@ -233,6 +245,7 @@ func (s *LiveSession) loop(ctx context.Context) {
 			"waitMs":  round2(float64(start.Sub(f.received).Microseconds()) / 1000),
 			"adaptMs": round2(float64(bs.adaptCost.Microseconds()) / 1000),
 			"stepMs":  round2(float64(bs.stepCost.Microseconds()) / 1000),
+			"flowMs":  round2(flowMS),
 		})
 	}
 }

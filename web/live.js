@@ -10,7 +10,7 @@ const Live = (() => {
   let s = null; // the running session
   const ema = (avg, x, k = 0.2) => (avg ? avg + (x - avg) * k : x);
 
-  const options = (params) => ({ ...params, adapt: +el("liveAdapt").value, budget: +el("liveBudget").value });
+  const options = (params) => ({ ...params, adapt: +el("liveAdapt").value, budget: +el("liveBudget").value, flow: el("liveFlow").checked });
 
   async function start(params) {
     if (s) return;
@@ -140,7 +140,8 @@ const Live = (() => {
     const st = s.stats;
     el("liveStats").innerHTML =
       `<b>${st.kfps}</b> keyframes/s · ${st.avgMs} ms cada uno · <b>${st.shapes}</b> formas<br>` +
-      `adaptadas ${st.adapted} · solo color ${st.recolored} · reemplazadas ${st.replaced} · nuevas ${st.added}<br>` +
+      `adaptadas ${st.adapted} · solo color ${st.recolored} · reemplazadas ${st.replaced} · nuevas ${st.added}` +
+      (st.flowMs ? ` · flujo ${st.flowMs} ms` : "") + "<br>" +
       `retraso en pantalla ~${Math.round(s.latency + 1.2 * s.interval)} ms`;
     el("stats").innerHTML = `<b>En vivo</b> · ${st.kfps} keyframes/s · ${st.shapes} formas`;
   }
@@ -178,7 +179,7 @@ const Live = (() => {
   }
 
   el("liveRec").addEventListener("click", toggleRecording);
-  for (const id of ["liveBudget", "liveAdapt"]) {
+  for (const id of ["liveBudget", "liveAdapt", "liveFlow"]) {
     el(id).addEventListener("input", () => {
       el("liveBudgetOut").textContent = el("liveBudget").value + " ms";
       el("liveAdaptOut").textContent = el("liveAdapt").value;

@@ -91,6 +91,7 @@ type budgetState struct {
 	adaptCost time.Duration // time per adapted shape (moving average)
 	stepCost  time.Duration // time per fastStep (moving average)
 	cursor    int           // round-robin position for refining still regions
+	stick     float64       // keep adapted shapes near where they start (see adaptShapeAnchored)
 }
 
 func average(avg *time.Duration, sample time.Duration) {
@@ -171,7 +172,7 @@ func buildFrameBudget(model *primitive.Model, p Params, prev []shapeRec, adapt i
 		var state *primitive.State
 		if pick[i] && time.Now().Before(deadline) {
 			t0 := time.Now()
-			state = adaptShape(model, rec, p.Alpha, adapt)
+			state = adaptShapeAnchored(model, rec, p.Alpha, adapt, bs.stick)
 			adaptTime += time.Since(t0)
 			st.Adapted++
 		} else {

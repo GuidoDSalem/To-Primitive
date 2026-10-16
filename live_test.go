@@ -6,8 +6,11 @@ import (
 	"image/color"
 	"image/draw"
 	"io"
+	"math"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,4 +175,84 @@ func decodeFrames(t *testing.T, path string, size, fps, n int) []*image.RGBA {
 		frames = append(frames, img)
 	}
 	return frames
+}
+
+// TestLiveFlowQuality compares the live pipeline with and without optical
+// flow on the panning clip from LIVE_FLOW_BENCH (the 512x512 Mona Lisa
+// scaled to 900 px with a moving 480x360 crop, see the README), with the same
+// time budget. It reports the error against each frame and how well shapes
+// follow the motion: the mean gap between each carried shape's displacement
+// and the true pan (lower is better for both).
+func TestLiveFlowQuality(t *testing.T) {
+	path := os.Getenv("LIVE_FLOW_BENCH")
+	if path == "" {
+		t.Skip("set LIVE_FLOW_BENCH=<panning clip> to measure")
+	}
+	const fps, size = 10, 128
+	frames := decodeFrames(t, path, size, fps, 60)
+	scale := float64(size) / 480
+	// Crop origin at time t, as in the ffmpeg filter that made the clip.
+	inW, inH := 900.0, 900.0 // the 512x512 image scaled to 900 wide
+	crop := func(t float64) (float64, float64) {
+		return (inW - 480) * (0.5 + 0.5*math.Sin(2*math.Pi*t/2)), (inH - 360) * (0.5 + 0.5*math.Cos(2*math.Pi*t/3))
+	}
+	center := func(d []float64) (float64, float64) {
+		x0, y0, x1, y1 := shapeBounds(d)
+		return (x0 + x1) / 2, (y0 + y1) / 2
+	}
+	p := Params{Shapes: 100, Mode: 1, Alpha: 128}
+	sticks := []float64{0}
+	if v := os.Getenv("STICKS"); v != "" {
+		sticks = nil
+		for _, f := range strings.Split(v, ",") {
+			x, _ := strconv.ParseFloat(f, 64)
+			sticks = append(sticks, x)
+		}
+	}
+	for _, cfg := range []struct{ adapt, budget int }{{30, 100}, {5, 40}} {
+		for _, useFlow := range []bool{false, true} {
+			for _, stick := range sticks {
+				if !useFlow && stick != 0 {
+					continue
+				}
+				var errSum, gapSum, gapN, n float64
+				for rep := 0; rep < 3; rep++ {
+					var prev []shapeRec
+					var prevImg *image.RGBA
+					state := budgetState{stick: stick}
+					for i, f := range frames {
+						t0 := time.Now()
+						start := prev
+						if useFlow {
+							start = followFlow(prev, estimateFlow(prevImg, f))
+						}
+						m := newTestModel(f)
+						fresh, _ := buildFrameBudget(m, p, start, cfg.adapt, newChangeMap(prevImg, f), t0.Add(time.Duration(cfg.budget)*time.Millisecond), &state)
+						cur := recsOf(m)
+						if i >= 10 {
+							w, h := f.Bounds().Dx(), f.Bounds().Dy()
+							errSum += meanAbsDiff(renderImage(w, h, w, h, testBG, cur), f)
+							n++
+							// Content moves opposite to the crop.
+							ax, ay := crop(float64(i-1) / fps)
+							bx, by := crop(float64(i) / fps)
+							tx, ty := -(bx-ax)*scale, -(by-ay)*scale
+							for j := range min(len(prev), len(cur)) {
+								if fresh[j] {
+									continue
+								}
+								px, py := center(prev[j].Data)
+								cx, cy := center(cur[j].Data)
+								gapSum += math.Hypot((cx-px)-tx, (cy-py)-ty)
+								gapN++
+							}
+						}
+						prev, prevImg = cur, f
+					}
+				}
+				fmt.Printf("adapt %2d, budget %3d ms, flow=%-5v stick %-7g: error %.2f   gap to true motion %.2f px\n",
+					cfg.adapt, cfg.budget, useFlow, stick, errSum/n, gapSum/gapN)
+			}
+		}
+	}
 }

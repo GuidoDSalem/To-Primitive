@@ -444,7 +444,7 @@ $("compute").addEventListener("click", async () => {
   const v = state.video;
   // Free the CPU for the computation.
   sendParams({ paused: true }, 0);
-  const opts = { ...readParams(), paused: false, kfps: +$("kfps").value, adapt: +$("adapt").value };
+  const opts = { ...readParams(), paused: false, kfps: +$("kfps").value, adapt: +$("adapt").value, flow: $("videoFlow").checked };
   try {
     await api(`/api/videos/${v.id}/compute`, {
       method: "POST",

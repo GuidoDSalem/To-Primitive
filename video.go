@@ -30,6 +30,7 @@ type ComputeOpts struct {
 	Params
 	KFPS  float64 `json:"kfps"`  // keyframes per second
 	Adapt int     `json:"adapt"` // hill-climb steps per carried-over shape
+	Flow  bool    `json:"flow"`  // move shapes with the optical flow first
 }
 
 func (o *ComputeOpts) clamp(info videoInfo) {
@@ -172,6 +173,7 @@ func (v *Video) computeKeyframes(ctx context.Context, j *job, o ComputeOpts) err
 	target := image.NewRGBA(image.Rect(0, 0, w, h))
 	var prev []shapeRec
 	var prevEnc [][]float64
+	var prevImg *image.RGBA
 	for {
 		if _, err := io.ReadFull(frames, target.Pix); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
@@ -184,7 +186,13 @@ func (v *Video) computeKeyframes(ctx context.Context, j *job, o ComputeOpts) err
 		}
 
 		model := primitive.NewModel(target, bg, max(w, h), numWorkers)
-		fresh := buildFrame(model, o.Params, prev, o.Adapt)
+		start, stick := prev, 0.0
+		if o.Flow {
+			start = followFlow(prev, estimateFlow(prevImg, target))
+			stick = stickFor(o.Adapt, max(w, h))
+		}
+		prevImg = cloneRGBA(target)
+		fresh := buildFrameStick(model, o.Params, start, o.Adapt, stick)
 		cur := make([]shapeRec, len(model.Shapes))
 		enc := make([][]float64, len(model.Shapes))
 		replaced := 0
@@ -255,3 +263,9 @@ func (v *Video) Unsubscribe(ch chan []byte) {
 func (v *Video) sourcePath() string { return v.path }
 
 func (v *Video) tempPath(name string) string { return filepath.Join(v.dir, name) }
+
+func cloneRGBA(img *image.RGBA) *image.RGBA {
+	out := *img
+	out.Pix = append([]uint8(nil), img.Pix...)
+	return &out
+}
