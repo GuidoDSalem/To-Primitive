@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"image"
-	"runtime"
 	"sync"
 	"time"
 
@@ -81,11 +79,12 @@ type Session struct {
 	gen     int
 	run     *run
 	running bool
-	subs    map[chan []byte]struct{}
+	hub     hub
 }
 
-func newSession(id string, src image.Image) *Session {
-	s := &Session{ID: id, Created: time.Now(), src: src, params: defaultParams(), subs: map[chan []byte]struct{}{}}
+func newSession(id string, src image.Image, p Params) *Session {
+	p.clamp()
+	s := &Session{ID: id, Created: time.Now(), src: src, params: p}
 	s.mu.Lock()
 	s.startRunLocked()
 	s.mu.Unlock()
@@ -116,10 +115,7 @@ func (s *Session) Close() {
 	if s.run != nil {
 		s.run.cancel()
 	}
-	for ch := range s.subs {
-		close(ch)
-		delete(s.subs, ch)
-	}
+	s.hub.closeAll()
 }
 
 func (s *Session) startRunLocked() {
@@ -138,14 +134,14 @@ func (s *Session) startRunLocked() {
 	b := img.Bounds()
 	// Render the model's own context at working size: we never read it, and
 	// exports re-render the shapes at the requested size.
-	model := primitive.NewModel(img, bg, max(b.Dx(), b.Dy()), runtime.NumCPU())
+	model := primitive.NewModel(img, bg, max(b.Dx(), b.Dy()), numWorkers)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.gen++
 	r := &run{gen: s.gen, w: b.Dx(), h: b.Dy(), bg: bg, score: model.Score, cancel: cancel, wake: make(chan struct{}, 1)}
 	s.run = r
 	s.running = false
-	s.broadcastLocked("snapshot", s.snapshotLocked())
+	s.hub.broadcast("snapshot", s.snapshotLocked())
 	go s.loop(ctx, r, model, p)
 }
 
@@ -194,11 +190,9 @@ func (s *Session) loop(ctx context.Context, r *run, model *primitive.Model, p Pa
 			return
 		}
 		for i := before; i < len(model.Shapes); i++ {
-			c := model.Colors[i]
-			attrs := fmt.Sprintf(`fill="#%02x%02x%02x" fill-opacity="%.3f"`, c.R, c.G, c.B, float64(c.A)/255)
-			rec := shapeRec{SVG: model.Shapes[i].SVG(attrs), Shape: model.Shapes[i], Color: c, Score: model.Scores[i]}
+			rec := recFromModel(model, i)
 			r.shapes = append(r.shapes, rec)
-			s.broadcastLocked("shape", map[string]any{"g": r.gen, "i": len(r.shapes) - 1, "svg": rec.SVG, "score": rec.Score})
+			s.hub.broadcast("shape", map[string]any{"g": r.gen, "i": len(r.shapes) - 1, "svg": rec.SVG, "score": rec.Score})
 		}
 		r.score = model.Score
 		s.mu.Unlock()
@@ -219,31 +213,9 @@ func (s *Session) snapshotLocked() map[string]any {
 }
 
 func (s *Session) broadcastStatusLocked() {
-	s.broadcastLocked("status", map[string]any{
+	s.hub.broadcast("status", map[string]any{
 		"g": s.run.gen, "count": len(s.run.shapes), "score": s.run.score, "running": s.running, "params": s.params,
 	})
-}
-
-func sseMessage(event string, data any) []byte {
-	b, _ := json.Marshal(data)
-	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", event, b)
-}
-
-func (s *Session) broadcastLocked(event string, data any) {
-	if len(s.subs) == 0 {
-		return
-	}
-	msg := sseMessage(event, data)
-	for ch := range s.subs {
-		select {
-		case ch <- msg:
-		default:
-			// Subscriber can't keep up: drop it. The browser's EventSource
-			// reconnects and gets a fresh snapshot.
-			close(ch)
-			delete(s.subs, ch)
-		}
-	}
 }
 
 // Subscribe returns the current snapshot plus a channel receiving every
@@ -251,15 +223,14 @@ func (s *Session) broadcastLocked(event string, data any) {
 func (s *Session) Subscribe() ([]byte, chan []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ch := make(chan []byte, 4096)
-	s.subs[ch] = struct{}{}
+	ch := s.hub.add()
 	return sseMessage("snapshot", s.snapshotLocked()), ch
 }
 
 func (s *Session) Unsubscribe(ch chan []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.subs, ch)
+	s.hub.remove(ch)
 }
 
 // Shapes returns the first n shapes of the current run (all if n <= 0).

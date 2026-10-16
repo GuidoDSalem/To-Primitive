@@ -10,15 +10,28 @@
   <aside id="panel">
     <header>
       <h1>To-Primitive</h1>
-      <p class="sub">Imágenes reconstruidas con formas geométricas</p>
+      <p class="sub">Imágenes y videos reconstruidos con formas geométricas</p>
     </header>
 
     <section>
-      <h2>Imagen</h2>
+      <h2>Archivo</h2>
       <label class="button wide">
-        <input id="file" type="file" accept="image/*" hidden>
-        Subir imagen…
+        <input id="file" type="file" accept="image/*,video/*" hidden>
+        Subir imagen o video…
       </label>
+    </section>
+
+    <section id="videoSection" hidden>
+      <h2>Video</h2>
+      <p id="videoInfo" class="hint"></p>
+      <div class="field">
+        <label for="timeline">Frames de prueba <output id="timeOut"></output></label>
+        <input id="timeline" type="range" min="0" max="1" step="0.01" value="0">
+        <img id="scrub" class="scrub" alt="">
+        <button id="addFrame" class="wide">Agregar este frame</button>
+        <p class="hint">Ajustá los parámetros sobre algunos frames y después renderizá el video completo.</p>
+      </div>
+      <div id="frames" class="frames"></div>
     </section>
 
     <fieldset id="controls" disabled>
@@ -75,8 +88,33 @@
         </div>
       </section>
 
+      <section id="renderSection" hidden>
+        <h2>Render de video</h2>
+        <div class="field">
+          <label for="fps">Cuadros por segundo</label>
+          <select id="fps"></select>
+        </div>
+        <div class="field">
+          <label for="adapt">Seguimiento del movimiento <output id="adaptOut"></output></label>
+          <input id="adapt" type="range" min="0" max="300" step="10" value="60">
+          <p class="hint">Cada frame parte de las formas del anterior. Más alto = las formas siguen mejor el movimiento; 0 = quedan fijas y solo cambian de color.</p>
+        </div>
+        <div class="field">
+          <label for="videoSize">Tamaño (lado mayor, px)</label>
+          <input id="videoSize" type="number" min="64" max="3840" value="720">
+        </div>
+        <label class="check"><input id="audio" type="checkbox" checked> Mantener audio</label>
+        <div class="row" style="margin-top:10px">
+          <button id="render" class="wide primary">Renderizar video</button>
+          <button id="cancelRender" class="wide" hidden>Cancelar</button>
+        </div>
+        <progress id="progress" max="1" value="0" hidden></progress>
+        <p id="renderStatus" class="hint"></p>
+        <a id="download" class="button wide" hidden>Descargar MP4</a>
+      </section>
+
       <section>
-        <h2>Exportar</h2>
+        <h2 id="exportTitle">Exportar</h2>
         <div class="field">
           <label for="exportSize">Tamaño (lado mayor, px)</label>
           <input id="exportSize" type="number" min="16" max="8192" value="1024">
@@ -93,6 +131,10 @@
   </aside>
 
   <main id="stage">
+    <nav id="tabs" hidden>
+      <button data-tab="editor" class="on">Editor</button>
+      <button data-tab="render">Render</button>
+    </nav>
     <div id="drop">
       <p><strong>Arrastrá una imagen acá</strong><br>o usá “Subir imagen…”</p>
     </div>
@@ -102,6 +144,14 @@
         <g clip-path="url(#clip)"><rect id="bg" x="0" y="0"/><g id="shapesG" transform="translate(0.5 0.5)"></g></g>
       </svg>
       <img id="original" alt="Original" hidden>
+    </div>
+    <div id="renderView" hidden>
+      <svg id="renderOut" xmlns="http://www.w3.org/2000/svg">
+        <defs><clipPath id="rclip"><rect id="rclipRect" x="0" y="0"/></clipPath></defs>
+        <g clip-path="url(#rclip)"><rect id="rbg" x="0" y="0"/><g id="rshapes" transform="translate(0.5 0.5)"></g></g>
+      </svg>
+      <video id="result" controls loop hidden></video>
+      <p id="renderEmpty" class="empty">Todavía no hay render. Ajustá los parámetros y tocá “Renderizar video”.</p>
     </div>
     <button id="compare" hidden title="Mantené apretado (o la barra espaciadora) para ver el original">Ver original</button>
   </main>
