@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>To-Primitive</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -89,28 +90,65 @@
       </section>
 
       <section id="renderSection" hidden>
-        <h2>Render de video</h2>
+        <h2>Animación</h2>
         <div class="field">
-          <label for="fps">Cuadros por segundo</label>
-          <select id="fps"></select>
+          <label for="kfps">Keyframes por segundo</label>
+          <select id="kfps"></select>
+          <p class="hint">Cuántos frames del video se calculan; el movimiento entre ellos se interpola. Menos = más rápido de calcular.</p>
         </div>
         <div class="field">
           <label for="adapt">Seguimiento del movimiento <output id="adaptOut"></output></label>
           <input id="adapt" type="range" min="0" max="300" step="10" value="60">
-          <p class="hint">Cada frame parte de las formas del anterior. Más alto = las formas siguen mejor el movimiento; 0 = quedan fijas y solo cambian de color.</p>
+          <p class="hint">Cada keyframe parte de las formas del anterior. Más alto = las formas siguen mejor el movimiento; 0 = quedan fijas y solo cambian de color.</p>
         </div>
-        <div class="field">
-          <label for="videoSize">Tamaño (lado mayor, px)</label>
-          <input id="videoSize" type="number" min="64" max="3840" value="720">
-        </div>
-        <label class="check"><input id="audio" type="checkbox" checked> Mantener audio</label>
-        <div class="row" style="margin-top:10px">
-          <button id="render" class="wide primary">Renderizar video</button>
-          <button id="cancelRender" class="wide" hidden>Cancelar</button>
+        <div class="row">
+          <button id="compute" class="wide primary">Calcular animación</button>
+          <button id="cancelCompute" class="wide" hidden>Cancelar</button>
         </div>
         <progress id="progress" max="1" value="0" hidden></progress>
-        <p id="renderStatus" class="hint"></p>
-        <a id="download" class="button wide" hidden>Descargar MP4</a>
+        <p id="computeStatus" class="hint"></p>
+
+        <div class="field" style="margin-top:14px">
+          <label for="interp">Interpolación</label>
+          <select id="interp">
+            <option value="smooth">Suave (curva continua)</option>
+            <option value="linear">Lineal</option>
+            <option value="step">Sin interpolar (saltos)</option>
+          </select>
+          <p class="hint">Se aplica al instante, sin recalcular.</p>
+        </div>
+      </section>
+
+      <section id="exportAnimSection" hidden>
+        <h2>Exportar animación</h2>
+        <div class="row">
+          <div class="field wide">
+            <label for="outFps">FPS</label>
+            <select id="outFps">
+              <option>24</option>
+              <option selected>30</option>
+              <option>60</option>
+            </select>
+          </div>
+          <div class="field wide">
+            <label for="outSize">Resolución</label>
+            <select id="outSize">
+              <option value="1280">720p</option>
+              <option value="1920" selected>1080p</option>
+              <option value="2560">1440p</option>
+              <option value="3840">4K</option>
+            </select>
+          </div>
+        </div>
+        <label class="check"><input id="audio" type="checkbox" checked> Mantener audio (MP4)</label>
+        <div class="row" style="margin-top:10px">
+          <button data-anim-export="mp4" class="wide primary">MP4</button>
+          <button data-anim-export="lottie" class="wide" title="JSON para After Effects (Bodymovin) o la web">Lottie</button>
+          <button data-anim-export="json" class="wide" title="Keyframes crudos">JSON</button>
+        </div>
+        <button id="cancelExport" class="wide" hidden>Cancelar exportación</button>
+        <progress id="exportProgress" max="1" value="0" hidden></progress>
+        <p id="exportStatus" class="hint"></p>
       </section>
 
       <section>
@@ -133,7 +171,7 @@
   <main id="stage">
     <nav id="tabs" hidden>
       <button data-tab="editor" class="on">Editor</button>
-      <button data-tab="render">Render</button>
+      <button data-tab="render">Animación</button>
     </nav>
     <div id="drop">
       <p><strong>Arrastrá una imagen acá</strong><br>o usá “Subir imagen…”</p>
@@ -146,16 +184,21 @@
       <img id="original" alt="Original" hidden>
     </div>
     <div id="renderView" hidden>
-      <svg id="renderOut" xmlns="http://www.w3.org/2000/svg">
-        <defs><clipPath id="rclip"><rect id="rclipRect" x="0" y="0"/></clipPath></defs>
-        <g clip-path="url(#rclip)"><rect id="rbg" x="0" y="0"/><g id="rshapes" transform="translate(0.5 0.5)"></g></g>
-      </svg>
-      <video id="result" controls loop hidden></video>
-      <p id="renderEmpty" class="empty">Todavía no hay render. Ajustá los parámetros y tocá “Renderizar video”.</p>
+      <div id="playerBox"><canvas id="player"></canvas></div>
+      <div id="playerBar">
+        <button id="play" title="Reproducir / pausar (barra espaciadora)">▶</button>
+        <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+        <span id="clock">0:00 / 0:00</span>
+        <label class="check"><input id="sound" type="checkbox" checked> Audio</label>
+      </div>
+      <p id="renderEmpty" class="empty">Todavía no hay animación. Ajustá los parámetros y tocá “Calcular animación”.</p>
+      <video id="sourceVideo" preload="auto" playsinline hidden></video>
     </div>
     <button id="compare" hidden title="Mantené apretado (o la barra espaciadora) para ver el original">Ver original</button>
   </main>
 
+  <script src="mp4.js"></script>
+  <script src="motion.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

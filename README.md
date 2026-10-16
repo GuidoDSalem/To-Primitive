@@ -5,7 +5,8 @@ Editor web local para reconstruir imágenes y videos con formas geométricas en 
 
 Subís una imagen o un video, movés los parámetros en el panel izquierdo y el resultado se va
 dibujando forma por forma en el panel principal. Los videos se ajustan sobre algunos frames de
-prueba y después se renderizan completos a MP4.
+prueba; después el servidor calcula *keyframes* y el navegador los anima como motion graphics
+vectoriales, a cualquier resolución, y los exporta a MP4, Lottie o JSON.
 
 ## Uso
 
@@ -41,26 +42,48 @@ go test ./...
    - Con la línea de tiempo y "Agregar este frame" elegís momentos representativos.
    - Los parámetros son los mismos para todos.
    - Al cambiar de frame se pausa el anterior, para no gastar CPU.
-3. **Renderizá** con estas opciones:
-   - *Cuadros por segundo*: el original o menos. Menos fps = render más rápido.
-   - *Seguimiento del movimiento*: ver abajo.
-   - *Tamaño de salida*.
-   - *Mantener audio*.
-4. **Mientras renderiza:**
-   - La pestaña **Render** muestra en vivo el último frame generado.
-   - El progreso indica frames hechos, velocidad y tiempo restante.
-   - Se puede cancelar.
-5. **Al terminar** se reproduce el MP4 (H.264) y se puede descargar.
+3. **Calculá la animación.** El servidor calcula *keyframes*: algunos frames por segundo (4–30, por defecto 8).
+   - Durante el cálculo, la pestaña **Animación** ya reproduce lo que va saliendo.
+   - El progreso indica keyframes hechos, velocidad y tiempo restante, y se puede cancelar.
+4. **Reproducí y ajustá** en la pestaña **Animación**:
+   - El navegador interpola las formas entre keyframes y las dibuja en un `<canvas>` a la resolución de tu pantalla.
+   - El audio original suena sincronizado.
+   - La *interpolación* se cambia al instante, sin recalcular: suave (curva continua), lineal o sin interpolar.
+5. **Exportá** (en el navegador, a 24/30/60 fps y de 720p a 4K):
+   - **MP4**: codificado con WebCodecs en H.264, o en VP9 si el navegador o la resolución no permiten H.264. Si pedís audio, el servidor le agrega la pista original con ffmpeg.
+   - **Lottie**: JSON para After Effects (Bodymovin) o para reproducir en la web con `lottie-web`. Cada forma es una capa vectorial animada.
+   - **JSON**: los keyframes crudos, para llevarlos a otra herramienta.
 
-### Suavizado entre frames
+### Por qué se ve nítido y fluido
 
-Si cada frame se generara desde cero, el resultado titilaría: `primitive` es aleatorio y elige formas distintas cada vez. Por eso:
+El cálculo y el dibujo están separados:
 
-- **Solo el primer frame** usa la búsqueda completa de `primitive`.
-- **Cada frame siguiente** parte de las formas del anterior, en el mismo orden:
+- **El cálculo** (`primitive`, en el servidor) trabaja a la *resolución de trabajo* (por ejemplo 256 px) y solo decide qué forma va, dónde y de qué color.
+- **El dibujo** (Canvas en el navegador) usa esas formas como vectores, a la resolución de salida. Una salida 4K no cuesta más cálculo.
+- **La interpolación** entre keyframes reparte el movimiento en todos los frames, con posiciones fraccionarias.
+  - Así desaparecen los "escalones": primitive guarda los vértices como enteros de la resolución de trabajo.
+  - Medido a 60 fps sobre el video de prueba:
+    - Sin interpolar, la imagen queda congelada 151 de 167 frames y salta de golpe en cada keyframe (salto máximo 21.7).
+    - Con interpolación cambia en todos los frames, con saltos ~4 veces más chicos (5–6).
+- **Formas reemplazadas:** cuando una forma se reemplaza entre dos keyframes, la vieja y la nueva hacen un fundido en vez de un corte.
+
+**Navegadores:**
+
+| Navegador | Soporte |
+|---|---|
+| Chrome / Edge | Todo |
+| Safari | H.264 por WebCodecs desde la versión 16.4 |
+| Firefox | WebCodecs desde la versión 130; si no hay H.264, el MP4 sale en VP9 |
+
+### Suavizado entre keyframes
+
+Si cada keyframe se generara desde cero, el resultado titilaría: `primitive` es aleatorio y elige formas distintas cada vez. Por eso:
+
+- **Solo el primer keyframe** usa la búsqueda completa de `primitive`.
+- **Cada keyframe siguiente** parte de las formas del anterior, en el mismo orden:
   1. Cada forma se re-optimiza con unos pocos pasos de *hill climbing* sobre el frame nuevo, en paralelo en todos los núcleos, y se queda con el mejor resultado.
   2. Su color se recalcula.
-  3. Si una forma ya no mejora la imagen (por ejemplo, en un cambio de escena), se reemplaza por una buscada desde cero.
+  3. Si una forma ya no mejora la imagen (por ejemplo, en un cambio de escena), se reemplaza en el mismo lugar por una buscada desde cero, y queda marcada como nueva.
 
 El slider *Seguimiento del movimiento* regula cuántos pasos de re-optimización recibe cada forma:
 
@@ -69,12 +92,13 @@ El slider *Seguimiento del movimiento* regula cuántos pasos de re-optimización
 | 0 | Las formas quedan fijas; solo cambia su color. Lo más estable y rápido. |
 | Más alto | Las formas se desplazan para seguir el movimiento. Más fiel, un poco más lento. |
 
-Además es mucho más rápido que buscar de cero: con 150 formas a 256 px, en 4 núcleos, ~1 s por frame contra ~10 s.
+Además es mucho más rápido que buscar de cero: con 150 formas a 256 px, en 4 núcleos, ~1 s por keyframe contra ~10 s.
 
-Los tests (`temporal_test.go`) lo verifican con datos:
+Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 
 - **Movimiento chico:** el cambio entre frames suavizados queda cerca del cambio real de la imagen, menos de la mitad que generando de cero.
 - **Movimiento grande:** adaptar las formas sigue el movimiento mejor que dejarlas fijas.
+- **Codificación:** las formas se codifican bien y las rotaciones giran por el camino corto.
 
 ## Parámetros
 
@@ -89,13 +113,15 @@ Los tests (`temporal_test.go`) lo verifican con datos:
 
 ## Arquitectura
 
-- **Backend** (Go: `main.go`, `session.go`, `render.go`, `video.go`, `temporal.go`):
+- **Backend** (Go: `main.go`, `session.go`, `render.go`, `video.go`, `temporal.go`, `encode.go`, `ffmpeg.go`):
   - Usa `primitive` como librería.
   - Cada imagen subida es una *sesión* con una corrida en segundo plano.
   - Las formas se envían al navegador por **Server-Sent Events** a medida que se generan.
   - Los parámetros se cambian con `PUT /api/sessions/{id}/params`.
 - **Frontend** (`web/`): HTML, CSS y JS plano, sin build ni dependencias. Va embebido en el binario.
-- **Video:** `ffmpeg` decodifica los frames y codifica el MP4 por pipes, sin archivos intermedios.
+- **Video:**
+  - En el servidor, `ffmpeg` decodifica los frames por un pipe y agrega el audio al MP4 exportado.
+  - En el navegador (`web/motion.js`, `web/mp4.js`): interpolación, dibujo, WebCodecs, un muxer MP4 propio y la generación de Lottie, sin librerías.
 - **Dependencias Go**:
   - `primitive` y las suyas: `gg`, `freetype`, `resize`, `x/image`.
   - Nada más.
@@ -109,7 +135,24 @@ Los tests (`temporal_test.go`) lo verifican con datos:
 | `POST /api/videos` | Sube un video (multipart, campo `video`) |
 | `GET /api/videos/{id}/frame?t=1.5&size=320` | Frame crudo en JPEG (previsualización) |
 | `POST /api/videos/{id}/frames` | Crea una sesión de edición sobre el frame `t` |
-| `GET /api/videos/{id}/events` | Stream SSE: `job` (progreso) y `preview` (último frame) |
-| `POST /api/videos/{id}/render` | Inicia el render (parámetros + `fps`, `adapt`, `size`, `audio`) |
-| `DELETE /api/videos/{id}/render` | Cancela el render |
-| `GET /api/videos/{id}/output` | El MP4 resultante (`?download=1` para descargarlo) |
+| `GET /api/videos/{id}/events` | Stream SSE: `job` (progreso), `animation` (dimensiones y fondo) y `keyframe` (cada keyframe calculado) |
+| `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`) |
+| `DELETE /api/videos/{id}/compute` | Cancela el cálculo |
+| `GET /api/videos/{id}/keyframes` | Todos los keyframes calculados hasta el momento (JSON) |
+| `GET /api/videos/{id}/source` | El video original (audio y reloj del reproductor) |
+| `POST /api/videos/{id}/mux` | Recibe un MP4 sin audio y lo devuelve con el audio original |
+
+### Formato de los keyframes
+
+`GET /api/videos/{id}/keyframes` devuelve `{width, height, background, kfps, duration, keyframes}`.
+
+- `keyframes[k][i]` es la forma `i` del keyframe `k`, como un array plano: `[tipo, r, g, b, a, nueva, ...parámetros]`.
+- Las coordenadas están en píxeles de la resolución de trabajo.
+- La forma `i` de un keyframe es la misma forma `i` del anterior, movida, salvo que `nueva` sea `1`.
+
+| Tipo | Forma | Parámetros |
+|---|---|---|
+| 0 | Triángulo / polígono | `x1, y1, x2, y2, …` |
+| 1 | Rectángulo (rotado o no) | `cx, cy, ancho, alto, ángulo°` |
+| 2 | Elipse / círculo | `cx, cy, rx, ry, ángulo°` |
+| 3 | Bézier cuadrática | `x1, y1, cx, cy, x2, y2, grosor` |

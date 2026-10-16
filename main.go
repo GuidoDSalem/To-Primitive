@@ -1,6 +1,7 @@
 // Command to-primitive serves a web editor around fogleman/primitive: upload
 // an image or a video, tweak the parameters and watch the shapes being added
-// live, then render the whole video frame by frame.
+// live, then compute the whole video as keyframes that the browser animates
+// and exports.
 package main
 
 import (
@@ -23,6 +24,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,7 +56,7 @@ type server struct {
 
 func main() {
 	addr := flag.String("addr", envOr("ADDR", ":8080"), "listen address")
-	dataDir := flag.String("data", envOr("DATA_DIR", filepath.Join(os.TempDir(), "to-primitive")), "directory for uploaded videos and renders")
+	dataDir := flag.String("data", envOr("DATA_DIR", filepath.Join(os.TempDir(), "to-primitive")), "directory for uploaded videos")
 	flag.Parse()
 
 	// Videos don't survive a restart (sessions live in memory), so start clean.
@@ -77,9 +79,11 @@ func main() {
 	mux.HandleFunc("GET /api/videos/{id}/frame", srv.withVideo(srv.frame))
 	mux.HandleFunc("POST /api/videos/{id}/frames", srv.withVideo(srv.frameSession))
 	mux.HandleFunc("GET /api/videos/{id}/events", srv.withVideo(srv.videoEvents))
-	mux.HandleFunc("POST /api/videos/{id}/render", srv.withVideo(srv.render))
-	mux.HandleFunc("DELETE /api/videos/{id}/render", srv.withVideo(srv.cancelRender))
-	mux.HandleFunc("GET /api/videos/{id}/output", srv.withVideo(srv.output))
+	mux.HandleFunc("POST /api/videos/{id}/compute", srv.withVideo(srv.compute))
+	mux.HandleFunc("DELETE /api/videos/{id}/compute", srv.withVideo(srv.cancelCompute))
+	mux.HandleFunc("GET /api/videos/{id}/keyframes", srv.withVideo(srv.keyframes))
+	mux.HandleFunc("GET /api/videos/{id}/source", srv.withVideo(srv.source))
+	mux.HandleFunc("POST /api/videos/{id}/mux", srv.withVideo(srv.mux))
 
 	log.Printf("To-Primitive listening on %s", *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))
@@ -256,6 +260,7 @@ func (srv *server) createVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var part io.Reader
+	var ext string
 	for {
 		p, err := mr.NextPart()
 		if err != nil {
@@ -264,13 +269,14 @@ func (srv *server) createVideo(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.FormName() == "video" {
 			part = p
+			ext = safeExt(p.FileName())
 			break
 		}
 	}
 
 	id := newID()
 	dir := filepath.Join(srv.dataDir, id)
-	path := filepath.Join(dir, "input")
+	path := filepath.Join(dir, "input"+ext)
 	err = os.MkdirAll(dir, 0o755)
 	if err == nil {
 		err = saveFile(path, part)
@@ -348,33 +354,70 @@ func (srv *server) videoEvents(w http.ResponseWriter, r *http.Request, v *Video)
 	serveSSE(w, r, snapshot, ch)
 }
 
-func (srv *server) render(w http.ResponseWriter, r *http.Request, v *Video) {
-	var o RenderOpts
+func (srv *server) compute(w http.ResponseWriter, r *http.Request, v *Video) {
+	var o ComputeOpts
 	if err := json.NewDecoder(r.Body).Decode(&o); err != nil {
 		http.Error(w, "bad options: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := v.StartRender(o); err != nil {
+	if err := v.StartCompute(o); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (srv *server) cancelRender(w http.ResponseWriter, r *http.Request, v *Video) {
-	v.CancelRender()
+func (srv *server) cancelCompute(w http.ResponseWriter, r *http.Request, v *Video) {
+	v.CancelCompute()
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (srv *server) output(w http.ResponseWriter, r *http.Request, v *Video) {
-	if !v.Done() {
-		http.Error(w, "no finished render", http.StatusNotFound)
+func (srv *server) keyframes(w http.ResponseWriter, r *http.Request, v *Video) {
+	a := v.Animation()
+	if a == nil {
+		http.Error(w, "nothing computed yet", http.StatusNotFound)
 		return
 	}
-	if r.URL.Query().Has("download") {
-		w.Header().Set("Content-Disposition", `attachment; filename="primitive.mp4"`)
+	writeJSON(w, a)
+}
+
+// source serves the original upload: the player uses it for the audio track
+// and as the clock that keeps the animation in sync with it.
+func (srv *server) source(w http.ResponseWriter, r *http.Request, v *Video) {
+	http.ServeFile(w, r, v.sourcePath())
+}
+
+// mux receives a video-only MP4 encoded in the browser and returns it with
+// the original audio added.
+func (srv *server) mux(w http.ResponseWriter, r *http.Request, v *Video) {
+	in, out := v.tempPath("browser-"+newID()+".mp4"), v.tempPath("muxed-"+newID()+".mp4")
+	defer os.Remove(in)
+	defer os.Remove(out)
+	if err := saveFile(in, r.Body); err != nil {
+		http.Error(w, "receiving video: "+err.Error(), http.StatusBadRequest)
+		return
 	}
-	http.ServeFile(w, r, v.output())
+	if err := v.MuxAudio(r.Context(), in, out); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	http.ServeFile(w, r, out)
+}
+
+// safeExt keeps a short alphanumeric extension of an uploaded file name, so
+// the saved file is served with the right content type.
+func safeExt(name string) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	if len(ext) < 2 || len(ext) > 6 {
+		return ""
+	}
+	for _, c := range ext[1:] {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+			return ""
+		}
+	}
+	return ext
 }
 
 func atoiOr(s string, def int) int {

@@ -47,8 +47,11 @@ func rebind(s primitive.Shape, w *primitive.Worker) primitive.Shape {
 // hill-climbing steps per worker, so shapes follow the motion instead of being
 // re-drawn from scratch: that keeps the video from flickering and is much
 // cheaper than a full search. A carried shape that no longer improves the
-// frame is replaced by a freshly searched one. Returns how many were replaced.
-func buildFrame(model *primitive.Model, p Params, prev []shapeRec, adapt int) (replaced int) {
+// frame is replaced, at the same index, by a freshly searched one.
+//
+// fresh[i] reports whether model.Shapes[i] is new rather than carried over
+// from prev[i].
+func buildFrame(model *primitive.Model, p Params, prev []shapeRec, adapt int) (fresh []bool) {
 	for _, rec := range prev {
 		if len(model.Shapes) >= p.Shapes {
 			break
@@ -56,15 +59,20 @@ func buildFrame(model *primitive.Model, p Params, prev []shapeRec, adapt int) (r
 		state := adaptShape(model, rec, p.Alpha, adapt)
 		if state.Energy() < model.Score {
 			model.Add(state.Shape, state.Alpha)
+			fresh = append(fresh, false)
 		} else {
+			// Repeat 0: exactly one shape, keeping indices aligned with prev.
 			model.Step(primitive.ShapeType(p.Mode), p.Alpha, 0)
-			replaced++
+			fresh = append(fresh, true)
 		}
 	}
 	for len(model.Shapes) < p.Shapes {
 		model.Step(primitive.ShapeType(p.Mode), p.Alpha, p.Repeat)
 	}
-	return replaced
+	for len(fresh) < len(model.Shapes) {
+		fresh = append(fresh, true)
+	}
+	return fresh
 }
 
 // adaptShape hill-climbs rec's shape against the model's current canvas on
