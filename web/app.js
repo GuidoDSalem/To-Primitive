@@ -628,6 +628,10 @@ const recording = (() => {
   fill("recOrder", Object.entries(Build.ORDERS));
   fill("recCurve", Object.entries(Build.CURVES).map(([k, c]) => [k, c.label]));
   fill("recEffect", Object.entries(Build.EFFECTS));
+  fill("sceneDepthMode", Object.entries(Scene3D.DEPTHS));
+  fill("sceneAssembly", Object.entries(Scene3D.ASSEMBLIES));
+  fill("sceneCamera", Object.entries(Scene3D.CAMERAS));
+  const is3D = () => document.querySelector("#recStyle .on")?.dataset.value === "3d";
   $("recCurve").value = "outCubic";
   $("recEffect").value = "fade";
 
@@ -652,6 +656,16 @@ const recording = (() => {
       duration: num("recDuration", 0.5, 120),
       holdStart: num("recHoldStart", 0, 10),
       holdEnd: num("recHoldEnd", 0, 10),
+      ...(is3D() && {
+        style: "3d",
+        depthMode: $("sceneDepthMode").value,
+        depth: +$("sceneDepth").value,
+        assembly: $("sceneAssembly").value,
+        scatter: +$("sceneScatter").value,
+        stagger: +$("sceneStagger").value,
+        camera: $("sceneCamera").value,
+        angle: +$("sceneAngle").value,
+      }),
     };
   }
 
@@ -672,7 +686,7 @@ const recording = (() => {
     const o = opts();
     const key = JSON.stringify([state.id, state.gen, img.shapes.length, o]);
     if (cache.key !== key) {
-      const plan = Build.plan(img, o);
+      const plan = o.style === "3d" ? Scene3D.plan(img, o) : Build.plan(img, o);
       cache = { key, src: { ...plan, audio: false, limit: plan.duration } };
     }
     return cache.src;
@@ -705,15 +719,34 @@ const recording = (() => {
     $("curveHint").textContent = hintFor(curve);
   }
 
-  for (const id of ["recDirection", "recOrder", "recCurve", "recEffect", "recEffectTime", "recDuration", "recHoldStart", "recHoldEnd"]) {
+  function updateRecOutputs() {
+    $("recEffectTimeOut").textContent = (+$("recEffectTime").value).toFixed(2) + " s";
+    $("recEffectTime").disabled = $("recEffect").value === "none";
+    $("sceneDepthOut").textContent = (+$("sceneDepth").value).toFixed(2) + "×";
+    $("sceneScatterOut").textContent = (+$("sceneScatter").value).toFixed(2) + "×";
+    $("sceneStaggerOut").textContent = (+$("sceneStagger").value).toFixed(2);
+    $("sceneAngleOut").textContent = $("sceneAngle").value + "°";
+    $("sceneAngle").disabled = $("sceneCamera").value === "static";
+    $("rec3d").hidden = !is3D();
+    $("rec2d").hidden = is3D();
+  }
+  const recInputs = ["recDirection", "recOrder", "recCurve", "recEffect", "recEffectTime", "recDuration", "recHoldStart", "recHoldEnd",
+    "sceneDepthMode", "sceneDepth", "sceneAssembly", "sceneScatter", "sceneStagger", "sceneCamera", "sceneAngle"];
+  for (const id of recInputs) {
     $(id).addEventListener("input", () => {
-      $("recEffectTimeOut").textContent = (+$("recEffectTime").value).toFixed(2) + " s";
-      $("recEffectTime").disabled = $("recEffect").value === "none";
+      updateRecOutputs();
       drawCurve();
       player.changed();
     });
   }
-  $("recEffectTimeOut").textContent = (+$("recEffectTime").value).toFixed(2) + " s";
+  $("recStyle").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    for (const x of $("recStyle").children) x.classList.toggle("on", x === b);
+    updateRecOutputs();
+    player.changed();
+  });
+  updateRecOutputs();
 
   $("recPreview").addEventListener("click", () => {
     showTab("render");

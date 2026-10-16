@@ -92,6 +92,45 @@
       <section id="recordSection" hidden>
         <h2>Grabar construcción</h2>
         <div class="field">
+          <label>Estilo</label>
+          <div id="recStyle" class="chips">
+            <button data-value="2d" class="on">Plano (2D)</button>
+            <button data-value="3d">Escena 3D</button>
+          </div>
+        </div>
+        <div id="rec3d" hidden>
+          <div class="field">
+            <label for="sceneDepthMode">Profundidad de cada forma</label>
+            <select id="sceneDepthMode"></select>
+          </div>
+          <div class="field">
+            <label for="sceneDepth">Separación en profundidad <output id="sceneDepthOut"></output></label>
+            <input id="sceneDepth" type="range" min="0" max="2" step="0.05" value="0.8">
+            <p class="hint">De frente siempre se ve la imagen exacta; la separación se nota al mover la cámara.</p>
+          </div>
+          <div class="field">
+            <label for="sceneAssembly">Cómo se arman</label>
+            <select id="sceneAssembly"></select>
+          </div>
+          <div class="field">
+            <label for="sceneScatter">Distancia del recorrido <output id="sceneScatterOut"></output></label>
+            <input id="sceneScatter" type="range" min="0.1" max="2" step="0.05" value="1">
+          </div>
+          <div class="field">
+            <label for="sceneStagger">Escalonado <output id="sceneStaggerOut"></output></label>
+            <input id="sceneStagger" type="range" min="0" max="1" step="0.05" value="0.6">
+            <p class="hint">0 = todas viajan juntas; 1 = llegan una detrás de otra (en el orden de aparición).</p>
+          </div>
+          <div class="field">
+            <label for="sceneCamera">Cámara</label>
+            <select id="sceneCamera"></select>
+          </div>
+          <div class="field">
+            <label for="sceneAngle">Ángulo de cámara <output id="sceneAngleOut"></output></label>
+            <input id="sceneAngle" type="range" min="0" max="80" step="1" value="35">
+          </div>
+        </div>
+        <div class="field">
           <label for="recDirection">Dirección</label>
           <select id="recDirection"></select>
         </div>
@@ -105,13 +144,15 @@
           <canvas id="curvePreview" width="560" height="200" title="Horizontal: tiempo. Vertical: cuánto de la imagen ya está construido."></canvas>
           <p class="hint" id="curveHint"></p>
         </div>
-        <div class="field">
-          <label for="recEffect">Efecto de aparición</label>
-          <select id="recEffect"></select>
-        </div>
-        <div class="field">
-          <label for="recEffectTime">Duración del efecto <output id="recEffectTimeOut"></output></label>
-          <input id="recEffectTime" type="range" min="0.05" max="3" step="0.05" value="0.6">
+        <div id="rec2d">
+          <div class="field">
+            <label for="recEffect">Efecto de aparición</label>
+            <select id="recEffect"></select>
+          </div>
+          <div class="field">
+            <label for="recEffectTime">Duración del efecto <output id="recEffectTimeOut"></output></label>
+            <input id="recEffectTime" type="range" min="0.05" max="3" step="0.05" value="0.6">
+          </div>
         </div>
         <div class="row">
           <div class="field wide">
@@ -262,6 +303,7 @@
   <script src="mp4.js"></script>
   <script src="motion.js"></script>
   <script src="build.js"></script>
+  <script src="scene3d.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

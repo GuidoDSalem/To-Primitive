@@ -124,17 +124,19 @@ const Build = (() => {
 
   // opts: { curve, order, effect, effectTime, direction, duration, holdStart, holdEnd }
   // Returns a source the player and the exporter can use.
-  function plan(img, opts) {
+  // When each shape starts appearing, and how timeline time maps to "build
+  // time" (0 = nothing, main = complete), given how long each shape's own
+  // transition lasts. Shared by the 2D recording and the 3D scene.
+  function schedule(img, opts, transition) {
     const shapes = img.shapes, n = shapes.length;
-    const { rank, geometry: geo } = ranks(shapes, opts.order, img.width, img.height);
+    const { rank, geometry } = ranks(shapes, opts.order, img.width, img.height);
     let ease = CURVES[opts.curve].f;
     if (opts.curve === "impact") {
       const gains = new Array(n);
       for (let i = 0; i < n; i++) gains[rank[i]] = Math.max(0, (i ? img.scores[i - 1] : img.baseScore) - img.scores[i]);
       ease = impactCurve(gains);
     }
-    const effectTime = opts.effect === "none" ? 0 : Math.min(opts.effectTime, opts.duration * 0.9);
-    const span = Math.max(0.001, opts.duration - effectTime); // shapes start within this
+    const span = Math.max(0.001, opts.duration - transition); // shapes start within this
     // Start time of each rank: invert the curve numerically (it's monotonic).
     const starts = new Float64Array(n);
     const steps = 4000;
@@ -149,7 +151,6 @@ const Build = (() => {
     const main = opts.duration;
     const total = opts.holdStart + main + (pingpong ? opts.holdEnd + main : 0) + opts.holdEnd;
 
-    // Map timeline time to "build time" (0 = nothing, main = complete).
     function buildTime(t) {
       t -= opts.holdStart;
       if (t <= 0) return opts.direction === "unbuild" ? main : 0;
@@ -160,6 +161,16 @@ const Build = (() => {
       return t <= 0 ? main : Math.max(0, main - t);
     }
 
+    // Start time of shape i (in drawing order).
+    const startOf = (i) => starts[rank[i]];
+    return { rank, geometry, startOf, ease, main, total, buildTime };
+  }
+
+  function plan(img, opts) {
+    const shapes = img.shapes, n = shapes.length;
+    const effectTime = opts.effect === "none" ? 0 : Math.min(opts.effectTime, opts.duration * 0.9);
+    const { geometry: geo, startOf, ease, total, buildTime } = schedule(img, opts, effectTime);
+
     function render(ctx, t, w, h) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = img.background;
@@ -167,7 +178,7 @@ const Build = (() => {
       const sx = w / img.width, sy = h / img.height;
       const bt = buildTime(t);
       for (let i = 0; i < n; i++) {
-        const local = effectTime > 0 ? clamp01((bt - starts[rank[i]]) / effectTime) : (bt >= starts[rank[i]] && bt > 0 ? 1 : 0);
+        const local = effectTime > 0 ? clamp01((bt - startOf(i)) / effectTime) : (bt >= startOf(i) && bt > 0 ? 1 : 0);
         if (local <= 0) continue;
         let factor = 1, scale = 1, dy = 0;
         switch (opts.effect) {
@@ -194,5 +205,5 @@ const Build = (() => {
     return { width: img.width, height: img.height, duration: total, render, ease };
   }
 
-  return { CURVES, ORDERS, EFFECTS, DIRECTIONS, plan };
+  return { CURVES, ORDERS, EFFECTS, DIRECTIONS, plan, schedule, geometry, shuffled };
 })();

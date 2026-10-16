@@ -61,6 +61,30 @@ En la pestaña **Grabación** se reproduce la imagen armándose forma por forma,
 
 El orden de aparición nunca cambia el orden de dibujo, así que el último frame es siempre exactamente la imagen del editor. Lo verifiqué en todas las combinaciones de orden y efecto.
 
+### Escena 3D
+
+Con **Estilo → Escena 3D**, la grabación pone cada forma como una lámina flotando en el espacio:
+
+- **Corrección anamórfica:** cada forma está a su propia profundidad y agrandada en proporción a su distancia. Así, **desde la cámara frontal se ve exactamente la imagen**, y desde cualquier otro ángulo se ven las capas con parallax.
+- **Profundidad de cada forma:** por orden (las primeras al fondo), por tamaño, por brillo o aleatoria, con separación ajustable.
+- **Cómo se arman:** llegan desde el fondo, explotan desde todas partes (con giro), caen desde arriba, o solo aparecen con fundido. La distancia del recorrido es ajustable.
+- **Escalonado:** de todas juntas a una detrás de otra, en el orden de aparición elegido. La curva de velocidad y la dirección se comparten con el modo 2D.
+- **Cámara:**
+  - Revelar: termina de frente justo cuando la imagen se completa.
+  - Vaivén.
+  - Barrido de lado a lado.
+  - Vuelta completa.
+  - Fija.
+
+  El ángulo es ajustable.
+
+Implementación sin dependencias (`web/scene3d.js`):
+
+- Proyección en perspectiva propia sobre Canvas 2D: cada forma se convierte en polígono y se proyectan sus vértices, lo que es exacto para piezas planas.
+- Las elipses se muestrean con 48 puntos y las Bézier con 20.
+- De frente, las formas se dibujan en el orden de primitive, así que colores y transparencias quedan iguales; desde atrás, en orden inverso, para que la oclusión sea correcta.
+- Verificado: con la cámara de frente, la escena coincide con la imagen del editor (diferencia media 0.04 sobre 255) en todos los modos y separaciones de profundidad. Un frame 1080p tarda ~1–2 ms.
+
 ## Video
 
 1. **Subí un video.** Se abre el editor sobre un frame de la mitad.
@@ -149,6 +173,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
   - En el servidor, `ffmpeg` decodifica los frames por un pipe y agrega el audio al MP4 exportado.
   - En el navegador (`web/motion.js`, `web/mp4.js`): interpolación, dibujo, WebCodecs, un muxer MP4 propio y la generación de Lottie, sin librerías.
 - **Grabación de imágenes** (`web/build.js`): línea de tiempo con curvas de easing, orden de aparición y efectos. Reutiliza el dibujo y el exportador MP4.
+- **Escena 3D** (`web/scene3d.js`): usa la misma línea de tiempo con cámara en perspectiva y piezas en profundidad.
 - **Dependencias Go**:
   - `primitive` y las suyas: `gg`, `freetype`, `resize`, `x/image`.
   - Nada más.
