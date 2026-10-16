@@ -37,7 +37,9 @@ go test ./...
 
 ## Grabar la construcción de una imagen
 
-En la pestaña **Grabación** se reproduce la imagen armándose forma por forma, y se exporta a MP4 (en el navegador, a 24/30/60 fps y de 720p a 4K). Todo se ve al instante, sin recalcular nada:
+En la pestaña **Grabación** se reproduce la imagen armándose forma por forma, y se exporta a MP4 (en el navegador, a 24/30/60 fps y de 720p a 4K). Todo se ve al instante, sin recalcular nada.
+
+Cada opción se elige con una **tarjeta con vista previa animada**: una mini grabación en bucle con tu imagen que muestra esa opción combinada con el resto de lo que elegiste. Las curvas de velocidad se muestran como gráficos, con un punto que las recorre y una barra de progreso. Hasta que el editor tiene formas, las tarjetas usan una imagen de demostración. Las opciones son:
 
 - **Dirección:** construir, deconstruir, o construir y deconstruir.
 - **Orden de aparición:**
@@ -173,6 +175,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
   - En el servidor, `ffmpeg` decodifica los frames por un pipe y agrega el audio al MP4 exportado.
   - En el navegador (`web/motion.js`, `web/mp4.js`): interpolación, dibujo, WebCodecs, un muxer MP4 propio y la generación de Lottie, sin librerías.
 - **Grabación de imágenes** (`web/build.js`): línea de tiempo con curvas de easing, orden de aparición y efectos. Reutiliza el dibujo y el exportador MP4.
+- **Selectores visuales** (`web/picker.js`): reemplazan un `<select>` por tarjetas animadas, que solo se dibujan mientras están en pantalla y a 24 fps. El `<select>` queda oculto como fuente del valor.
 - **Escena 3D** (`web/scene3d.js`): usa la misma línea de tiempo con cámara en perspectiva y piezas en profundidad.
 - **Dependencias Go**:
   - `primitive` y las suyas: `gg`, `freetype`, `resize`, `x/image`.

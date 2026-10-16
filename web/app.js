@@ -123,7 +123,7 @@ function render() {
   renderStats(visible);
   if (!state.video) {
     player.changed(); // the recording uses these shapes
-    if ($("recCurve").value === "impact") recording.drawCurve();
+    Picker.refreshSoon(); // and so do the option previews
   }
 }
 
@@ -692,31 +692,8 @@ const recording = (() => {
     return cache.src;
   }
 
-  // Plot of the speed curve: time across, share of the image built up.
   function drawCurve() {
-    const c = $("curvePreview"), g = c.getContext("2d");
-    const css = getComputedStyle(document.documentElement);
-    const w = c.width, h = c.height, pad = 14;
-    g.clearRect(0, 0, w, h);
-    g.strokeStyle = css.getPropertyValue("--line");
-    g.lineWidth = 1;
-    g.strokeRect(pad, pad, w - 2 * pad, h - 2 * pad);
-    const curve = $("recCurve").value;
-    const ease = curve === "impact" ? source()?.ease ?? ((p) => p) : Build.CURVES[curve].f;
-    g.strokeStyle = css.getPropertyValue("--accent");
-    g.lineWidth = 3;
-    g.beginPath();
-    for (let k = 0; k <= 200; k++) {
-      const p = k / 200;
-      const x = pad + p * (w - 2 * pad), y = h - pad - ease(p) * (h - 2 * pad);
-      k ? g.lineTo(x, y) : g.moveTo(x, y);
-    }
-    g.stroke();
-    g.fillStyle = css.getPropertyValue("--muted");
-    g.font = "20px system-ui, sans-serif";
-    g.fillText("tiempo →", w - pad - 90, h - pad - 8);
-    g.fillText("imagen construida ↑", pad + 8, pad + 24);
-    $("curveHint").textContent = hintFor(curve);
+    $("curveHint").textContent = hintFor($("recCurve").value);
   }
 
   function updateRecOutputs() {
@@ -737,6 +714,7 @@ const recording = (() => {
       updateRecOutputs();
       drawCurve();
       player.changed();
+      Picker.refresh();
     });
   }
   $("recStyle").addEventListener("click", (e) => {
@@ -745,6 +723,7 @@ const recording = (() => {
     for (const x of $("recStyle").children) x.classList.toggle("on", x === b);
     updateRecOutputs();
     player.changed();
+    Picker.refresh();
   });
   updateRecOutputs();
 
@@ -787,6 +766,81 @@ const recording = (() => {
       $("recProgress").hidden = true;
     }
   });
+
+  // ---- visual pickers: each option previews itself with the current image ----
+
+  // Stand-in image for the previews until the editor has shapes.
+  function hsl(h, s, l) {
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => { const k = (n + h / 30) % 12; return 255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))); };
+    return [f(0), f(8), f(4)];
+  }
+  const DEMO = (() => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    const W = 120, Hh = 90, shapes = [], scores = [];
+    for (let i = 0; i < 70; i++) {
+      const size = 50 * (1 - i / 80) + 6;
+      const x = rnd() * W, y = rnd() * Hh;
+      const [r, g, bl] = hsl((x / W) * 240 + (y / Hh) * 60, 0.6, 0.55);
+      shapes.push([0, r, g, bl, 170, 1,
+        x + (rnd() - 0.5) * size, y - size / 2, x - size / 2, y + size / 2, x + size / 2, y + (rnd() - 0.3) * size]);
+      scores.push(1 - Math.sqrt((i + 1) / 70) * 0.8);
+    }
+    return { width: W, height: Hh, background: "#2a3242", shapes, scores, baseScore: 1 };
+  })();
+  const thumbImage = () => image() ?? DEMO;
+  const planFor = (o) => (o.style === "3d" ? Scene3D.plan(thumbImage(), o) : Build.plan(thumbImage(), o));
+  // Short loops so every card shows its whole story in a couple of seconds.
+  const quick = () => ({ ...opts(), duration: 2.2, holdStart: 0.2, holdEnd: 0.8, effectTime: Math.min(+$("recEffectTime").value, 0.6) });
+  const variant = (key) => (value) => planFor({ ...quick(), [key]: value });
+
+  Picker.attach($("recDirection"), variant("direction"));
+  Picker.attach($("recOrder"), variant("order"));
+  Picker.attach($("recEffect"), (value) => Build.plan(thumbImage(), { ...quick(), style: "2d", effect: value, curve: "linear", order: "original" }));
+  // Curves: the plot of the curve, a dot running along it, and a bar showing
+  // how much of the image is built.
+  Picker.attach($("recCurve"), (value) => {
+    const ease = value === "impact" ? Build.plan(thumbImage(), { ...quick(), curve: "impact" }).ease : Build.CURVES[value].f;
+    const css = getComputedStyle(document.documentElement);
+    return {
+      duration: 2.6,
+      render(ctx, t, w, h) {
+        const p = Math.min(1, t / 2);
+        const pad = 12, gw = w - 2 * pad, gh = h - 2 * pad - 14;
+        ctx.strokeStyle = css.getPropertyValue("--line");
+        ctx.lineWidth = 2;
+        ctx.strokeRect(pad, pad, gw, gh);
+        ctx.strokeStyle = css.getPropertyValue("--accent");
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        for (let k = 0; k <= 60; k++) {
+          const x = pad + (k / 60) * gw, y = pad + gh - ease(k / 60) * gh;
+          k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+        ctx.fillStyle = css.getPropertyValue("--text");
+        ctx.beginPath();
+        ctx.arc(pad + p * gw, pad + gh - ease(p) * gh, 7, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillStyle = css.getPropertyValue("--line");
+        ctx.fillRect(pad, h - pad - 6, gw, 6);
+        ctx.fillStyle = css.getPropertyValue("--accent");
+        ctx.fillRect(pad, h - pad - 6, gw * ease(p), 6);
+      },
+    };
+  });
+  // 3D: depth previews sway the camera over the finished image to show the
+  // layering; assembly and camera previews play the whole build.
+  Picker.attach($("sceneDepthMode"), (value) => Scene3D.plan(thumbImage(),
+    { ...quick(), style: "3d", depthMode: value, assembly: "none", camera: "sway", angle: Math.max(30, +$("sceneAngle").value), duration: 0.05, holdStart: 0, holdEnd: 3 }));
+  Picker.attach($("sceneAssembly"), variant("assembly"));
+  // Camera previews keep the shapes in place (just fading in) so what you
+  // see is the camera's movement, not pieces flying out of frame.
+  Picker.attach($("sceneCamera"), (value) => Scene3D.plan(thumbImage(), {
+    ...quick(), style: "3d", direction: "build", camera: value, assembly: "none", stagger: 0,
+    angle: Math.max(35, +$("sceneAngle").value), duration: 1.8, holdStart: 0, holdEnd: 1.6,
+  }));
 
   drawCurve();
   return { source, drawCurve };

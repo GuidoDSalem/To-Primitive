@@ -46,15 +46,15 @@
         <div class="field">
           <label>Tipo</label>
           <div id="mode" class="chips">
-            <button data-value="1">Triángulo</button>
-            <button data-value="2">Rectángulo</button>
-            <button data-value="5">Rect. rotado</button>
-            <button data-value="3">Elipse</button>
-            <button data-value="7">Elipse rotada</button>
-            <button data-value="4">Círculo</button>
-            <button data-value="6">Bézier</button>
-            <button data-value="8">Polígono</button>
-            <button data-value="0">Combinado</button>
+            <button data-value="1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 21 20H3z"/></svg>Triángulo</button>
+            <button data-value="2"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12"/></svg>Rectángulo</button>
+            <button data-value="5"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="10" transform="rotate(-25 12 12)"/></svg>Rect. rotado</button>
+            <button data-value="3"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="6"/></svg>Elipse</button>
+            <button data-value="7"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/></svg>Elipse rotada</button>
+            <button data-value="4"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>Círculo</button>
+            <button data-value="6"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18Q12 -2 21 16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>Bézier</button>
+            <button data-value="8"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9 11 3l9 5-2 11-10 2z"/></svg>Polígono</button>
+            <button data-value="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20 9 9l6 11z"/><circle cx="17" cy="8" r="5"/></svg>Combinado</button>
           </div>
         </div>
       </section>
@@ -141,7 +141,6 @@
         <div class="field">
           <label for="recCurve">Velocidad (curva de easing)</label>
           <select id="recCurve"></select>
-          <canvas id="curvePreview" width="560" height="200" title="Horizontal: tiempo. Vertical: cuánto de la imagen ya está construido."></canvas>
           <p class="hint" id="curveHint"></p>
         </div>
         <div id="rec2d">
@@ -304,6 +303,7 @@
   <script src="motion.js"></script>
   <script src="build.js"></script>
   <script src="scene3d.js"></script>
+  <script src="picker.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

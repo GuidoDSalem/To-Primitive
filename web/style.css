@@ -41,7 +41,12 @@ fieldset:disabled { opacity: .45; }
 
 .field { margin-bottom: 14px; }
 .row > .field { margin-bottom: 0; }
-#curvePreview { display: block; width: 100%; height: auto; aspect-ratio: 14 / 5; margin-top: 8px; border-radius: 6px; background: var(--bg); }
+.picks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.pick { display: flex; flex-direction: column; gap: 4px; padding: 4px; text-align: left; }
+.pick canvas { display: block; width: 100%; aspect-ratio: 3 / 2; border-radius: 4px; background: var(--bg); }
+.pick span { font-size: 11px; line-height: 1.25; color: var(--muted); }
+.pick.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.pick.on span { color: var(--text); }
 .field > label:first-child { display: flex; justify-content: space-between; margin-bottom: 4px; }
 output { color: var(--accent); font-variant-numeric: tabular-nums; }
 
@@ -64,7 +69,8 @@ button:hover:not(:disabled), .button:hover { border-color: var(--accent); }
 .wide { flex: 1; width: 100%; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chips button { padding: 5px 9px; font-size: 13px; }
+.chips button { padding: 5px 9px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.chips svg { width: 16px; height: 16px; fill: currentColor; opacity: .85; }
 .chips button.on { background: var(--accent); border-color: var(--accent); color: #0b1020; }
 
 #stats { margin-top: auto; border-bottom: 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
