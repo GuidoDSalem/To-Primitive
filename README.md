@@ -87,6 +87,35 @@ Implementación sin dependencias (`web/scene3d.js`):
 - De frente, las formas se dibujan en el orden de primitive, así que colores y transparencias quedan iguales; desde atrás, en orden inverso, para que la oclusión sea correcta.
 - Verificado: con la cámara de frente, la escena coincide con la imagen del editor (diferencia media 0.04 sobre 255) en todos los modos y separaciones de profundidad. Un frame 1080p tarda ~1–2 ms.
 
+## En vivo (webcam)
+
+Con **Usar cámara (en vivo)**, la webcam se transforma en formas en tiempo real. Se puede grabar el resultado (MP4 en Chrome/Edge/Safari, WebM en otros) o capturar la ventana con OBS para transmitirlo.
+
+**Cómo funciona:**
+
+- **Sin cola de frames:** el servidor pide un frame cuando termina el anterior (evento `ready`), así siempre trabaja sobre el más reciente y no se acumula atraso.
+- **Cada keyframe tiene un presupuesto de tiempo** (por defecto 120 ms, ajustable):
+  - Las formas sobre las **zonas que cambiaron** se re-optimizan primero. La zona se mide con un mapa de diferencias entre frames que se consulta en tiempo constante.
+  - Si sobra tiempo, se refinan por turnos las de las zonas quietas.
+  - El resto solo recalcula su color, que es casi gratis.
+- **Arranque progresivo:** la imagen arranca con pocas formas y suma más en cada keyframe hasta llegar a la cantidad pedida. Las formas nuevas usan una búsqueda rápida: la de primitive tarda ~100 ms por forma.
+- **Dibujo en el navegador:** se dibuja un instante un poco atrasado (latencia más un intervalo entre keyframes), interpolando con el mismo motor que el video. Todos los cuadros de pantalla cambian, aunque los keyframes lleguen a 10–15 por segundo.
+- **Parámetros en vivo:** formas, tipo, opacidad, resolución, fondo, seguimiento e interpolación se pueden cambiar mientras corre.
+
+**Medido en 4 núcleos**, solo el cálculo del servidor, con frames de video real (`LIVE_BENCH=video.mp4 go test -run TestLiveThroughput -v`):
+
+| Formas | Resolución | Keyframes/s |
+|---|---|---|
+| 50 | 96 px | ~32 |
+| 100 | 128 px | ~14 |
+| 200 | 128 px | ~10 |
+| 150 | 192 px | ~8 |
+
+En el navegador, con cámara simulada en Chrome:
+
+- 100 formas a 128 px: ~11 keyframes/s, con ~200 ms de retraso en pantalla.
+- 50 formas: ~16 keyframes/s, con ~140 ms de retraso.
+
 ## Video
 
 1. **Subí un video.** Se abre el editor sobre un frame de la mitad.
@@ -177,6 +206,10 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 - **Grabación de imágenes** (`web/build.js`): línea de tiempo con curvas de easing, orden de aparición y efectos. Reutiliza el dibujo y el exportador MP4.
 - **Selectores visuales** (`web/picker.js`): reemplazan un `<select>` por tarjetas animadas, que solo se dibujan mientras están en pantalla y a 24 fps. El `<select>` queda oculto como fuente del valor.
 - **Escena 3D** (`web/scene3d.js`): usa la misma línea de tiempo con cámara en perspectiva y piezas en profundidad.
+- **En vivo:**
+  - `live.go` maneja la sesión y el bucle de frames.
+  - `budget.go` arma los keyframes con presupuesto de tiempo, mapa de cambios y búsqueda rápida.
+  - `web/live.js` se encarga de la cámara, el dibujo con retraso y la grabación.
 - **Dependencias Go**:
   - `primitive` y las suyas: `gg`, `freetype`, `resize`, `x/image`.
   - Nada más.
@@ -196,6 +229,11 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/videos/{id}/keyframes` | Todos los keyframes calculados hasta el momento (JSON) |
 | `GET /api/videos/{id}/source` | El video original (audio y reloj del reproductor) |
 | `POST /api/videos/{id}/mux` | Recibe un MP4 sin audio y lo devuelve con el audio original |
+| `POST /api/live` | Crea una sesión en vivo (parámetros + `adapt`, `budget` en ms) |
+| `GET /api/live/{id}/events` | Stream SSE: `ready` (mandá un frame), `animation`, `keyframe` y `stats` |
+| `POST /api/live/{id}/frame` | Un frame de la cámara (JPEG); header `X-Capture-Time` con el reloj del navegador |
+| `PUT /api/live/{id}/params` | Cambia los parámetros (`restart: true` empieza de nuevo) |
+| `DELETE /api/live/{id}` | Cierra la sesión (también se cierra sola a los 10 s sin nadie mirando) |
 
 ### Formato de los keyframes
 

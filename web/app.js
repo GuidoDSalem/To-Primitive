@@ -78,6 +78,13 @@ function updateOutputs() {
 
 let sendTimer = null;
 function sendParams(extra = {}, delay = 120) {
+  if (Live.active()) {
+    state.params = { ...readParams(), ...extra };
+    delete state.params.restart;
+    updateOutputs();
+    Live.setParams(state.params, !!extra.restart);
+    return;
+  }
   if (!state.id) return;
   state.params = { ...readParams(), ...extra };
   delete state.params.restart;
@@ -237,6 +244,7 @@ function openSession(sid, originalURL) {
 
 async function upload(file) {
   if (!file) return;
+  if (Live.active()) leaveLive();
   try {
     if (file.type.startsWith("video/")) await uploadVideo(file);
     else if (file.type.startsWith("image/")) await uploadImage(file);
@@ -296,6 +304,42 @@ function closeVideo() {
   $("frames").replaceChildren();
   $("exportTitle").textContent = "Exportar";
 }
+
+// ---------- live (webcam) ----------
+
+async function enterLive() {
+  closeVideo();
+  if (state.id && state.params) putParams(state.id, state.params, { paused: true });
+  state.events?.close();
+  state.id = null;
+  // Live needs light settings to keep up: few shapes, small working size.
+  const p = readParams();
+  if (p.shapes > 150) $("shapes").value = 100;
+  if (p.inputSize > 160) $("inputSize").value = 128;
+  state.params = { ...readParams(), paused: false };
+  updateOutputs();
+  for (const id of ["drop", "view", "renderView", "tabs", "compare", "recordSection", "renderSection", "exportAnimSection", "videoSection"]) $(id).hidden = true;
+  $("exportTitle").parentElement.hidden = true;
+  $("controls").disabled = false;
+  $("stats").textContent = "Abriendo la cámara…";
+  try {
+    await Live.start(state.params);
+  } catch (e) {
+    $("stats").textContent = "No se pudo usar la cámara: " + e.message;
+    $("drop").hidden = false;
+    $("exportTitle").parentElement.hidden = false;
+  }
+}
+
+function leaveLive() {
+  Live.stop();
+  $("exportTitle").parentElement.hidden = false;
+  $("drop").hidden = !!state.id;
+  $("stats").textContent = state.id ? "" : "Sin imagen";
+}
+
+$("liveStart").addEventListener("click", enterLive);
+$("liveStop").addEventListener("click", leaveLive);
 
 $("file").addEventListener("change", (e) => {
   upload(e.target.files[0]);

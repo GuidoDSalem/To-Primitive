@@ -39,6 +39,8 @@ const (
 	maxUpload   = 64 << 20
 	maxSessions = 12
 	maxVideos   = 2
+	maxLives    = 2
+	maxFrame    = 8 << 20 // one live frame (JPEG)
 	// Frames used to tune parameters are capped at this size: the working
 	// resolution never goes above 1024 anyway.
 	maxFrameSize = 1024
@@ -52,6 +54,7 @@ type server struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	videos   map[string]*Video
+	lives    map[string]*LiveSession
 }
 
 func main() {
@@ -65,7 +68,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	srv := &server{dataDir: *dataDir, sessions: map[string]*Session{}, videos: map[string]*Video{}}
+	srv := &server{dataDir: *dataDir, sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
 	web, _ := fs.Sub(webFS, "web")
 
 	mux := http.NewServeMux()
@@ -84,6 +87,12 @@ func main() {
 	mux.HandleFunc("GET /api/videos/{id}/keyframes", srv.withVideo(srv.keyframes))
 	mux.HandleFunc("GET /api/videos/{id}/source", srv.withVideo(srv.source))
 	mux.HandleFunc("POST /api/videos/{id}/mux", srv.withVideo(srv.mux))
+
+	mux.HandleFunc("POST /api/live", srv.createLive)
+	mux.HandleFunc("GET /api/live/{id}/events", srv.withLive(srv.liveEvents))
+	mux.HandleFunc("POST /api/live/{id}/frame", srv.withLive(srv.liveFrame))
+	mux.HandleFunc("PUT /api/live/{id}/params", srv.withLive(srv.liveParams))
+	mux.HandleFunc("DELETE /api/live/{id}", srv.withLive(srv.closeLive))
 
 	log.Printf("To-Primitive listening on %s", *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))
@@ -418,6 +427,80 @@ func safeExt(name string) string {
 		}
 	}
 	return ext
+}
+
+// ---------- live (webcam) ----------
+
+func (srv *server) withLive(h func(http.ResponseWriter, *http.Request, *LiveSession)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srv.mu.Lock()
+		s := srv.lives[r.PathValue("id")]
+		srv.mu.Unlock()
+		if s == nil {
+			http.Error(w, "live session not found", http.StatusNotFound)
+			return
+		}
+		h(w, r, s)
+	}
+}
+
+func (srv *server) createLive(w http.ResponseWriter, r *http.Request) {
+	o := defaultLiveOpts()
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&o); err != nil {
+			http.Error(w, "bad options: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	id := newID()
+	s := newLiveSession(id, o, func() {
+		srv.mu.Lock()
+		delete(srv.lives, id)
+		srv.mu.Unlock()
+	})
+	srv.mu.Lock()
+	srv.lives[id] = s
+	evictOldest(srv.lives, maxLives)
+	srv.mu.Unlock()
+	writeJSON(w, map[string]any{"id": id, "opts": s.opts})
+}
+
+func (srv *server) liveEvents(w http.ResponseWriter, r *http.Request, s *LiveSession) {
+	snapshot, ch := s.Subscribe()
+	defer s.Unsubscribe(ch)
+	serveSSE(w, r, snapshot, ch)
+}
+
+// liveFrame receives one webcam frame; X-Capture-Time is the browser's clock
+// when it was taken, echoed back with the keyframe built from it.
+func (srv *server) liveFrame(w http.ResponseWriter, r *http.Request, s *LiveSession) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFrame)
+	img, _, err := image.Decode(r.Body)
+	if err != nil {
+		http.Error(w, "bad frame: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	captured, _ := strconv.ParseFloat(r.Header.Get("X-Capture-Time"), 64)
+	s.PushFrame(img, captured)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (srv *server) liveParams(w http.ResponseWriter, r *http.Request, s *LiveSession) {
+	var body struct {
+		LiveOpts
+		Restart bool `json:"restart"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad params: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.SetOpts(body.LiveOpts, body.Restart)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (srv *server) closeLive(w http.ResponseWriter, r *http.Request, s *LiveSession) {
+	s.Close()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func atoiOr(s string, def int) int {

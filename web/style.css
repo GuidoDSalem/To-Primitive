@@ -121,6 +121,11 @@ a.button { margin-top: 8px; text-decoration: none; }
 
 #compare { position: absolute; right: 24px; bottom: 24px; }
 
+#liveView { position: absolute; inset: 24px; }
+#liveBox { position: absolute; inset: 0; display: grid; place-items: center; }
+#liveCanvas { display: block; max-width: 100%; max-height: 100%; }
+#liveCam { position: absolute; right: 12px; bottom: 12px; width: 22%; border-radius: 8px; border: 1px solid var(--line); }
+
 @media (max-width: 760px) {
   body { flex-direction: column; }
   #panel { flex: none; max-width: none; max-height: 50vh; }
