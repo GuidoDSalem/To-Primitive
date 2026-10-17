@@ -256,3 +256,20 @@ func TestLiveFlowQuality(t *testing.T) {
 		}
 	}
 }
+
+// A keyframe can start with its budget already spent (lots of shapes, slow
+// machine): it must still build the frame, not crash.
+func TestBuildFrameBudgetDeadlineAlreadyPassed(t *testing.T) {
+	p := Params{Shapes: 40, Mode: 1, Alpha: 128}
+	f0, f1 := testFrame(0), testFrame(3)
+	prev := frameShapes(f0, p, nil, 0)
+	bs := budgetState{adaptCost: time.Millisecond}
+	m := newTestModel(f1)
+	fresh, st := buildFrameBudget(m, p, prev, 30, newChangeMap(f0, f1), time.Now().Add(-50*time.Millisecond), &bs)
+	if len(fresh) != len(prev) || len(m.Shapes) != len(prev) {
+		t.Errorf("got %d shapes (%d flags), want the %d carried over", len(m.Shapes), len(fresh), len(prev))
+	}
+	if st.Adapted != 0 {
+		t.Errorf("no time left, yet adapted %d shapes", st.Adapted)
+	}
+}

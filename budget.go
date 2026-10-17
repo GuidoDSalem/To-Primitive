@@ -141,7 +141,9 @@ func buildFrameBudget(model *primitive.Model, p Params, prev []shapeRec, adapt i
 	pick := make([]bool, n)
 	if adapt > 0 && n > 0 {
 		per := max(bs.adaptCost, 50*time.Microsecond)
-		k := min(n, int(float64(time.Until(deadline))*0.6/float64(per)))
+		// Never negative: the budget may already be spent when we get here
+		// (many shapes to carry over, slow machine).
+		k := max(0, min(n, int(float64(time.Until(deadline))*0.6/float64(per))))
 		if change != nil {
 			scores := make([]float64, n)
 			idx := make([]int, 0, n)
