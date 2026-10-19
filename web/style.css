@@ -47,6 +47,8 @@ fieldset:disabled { opacity: .45; }
 .pick span { font-size: 11px; line-height: 1.25; color: var(--muted); }
 .pick.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .pick.on span { color: var(--text); }
+.curve-view { margin-bottom: 6px; }
+.curve-view button { padding: 3px 8px; font-size: 12px; }
 .field > label:first-child { display: flex; justify-content: space-between; margin-bottom: 4px; }
 output { color: var(--accent); font-variant-numeric: tabular-nums; }
 

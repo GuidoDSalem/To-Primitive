@@ -961,7 +961,13 @@ for (const id of ["kfps", "adapt", "videoFlow", "interp", "recOrder", "recCurve"
   const quick = () => ({ direction: "build", ...buildOpts(), duration: 2.2, holdStart: 0.2, holdEnd: 0.8, effectTime: Math.min(+$("recEffectTime").value, 0.6) });
   const variant = (key) => (value) => (thumb()?.shapes.length ? Build.plan(thumb(), { ...quick(), [key]: value }) : null);
   Picker.attach($("recOrder"), variant("order"));
-  Picker.attach($("recCurve"), variant("curve"));
+  // Curves: the plot of the curve, or the build playing with it.
+  const curveView = Picker.curveToggle($("curveView"), "result");
+  Picker.attach($("recCurve"), (value) => {
+    if (curveView() === "result") return variant("curve")(value);
+    if (value !== "impact") return Picker.curve(Build.CURVES[value].f);
+    return thumb()?.shapes.length ? Picker.curve(Build.plan(thumb(), { ...quick(), curve: "impact" }).ease) : null;
+  });
   Picker.attach($("recEffect"), variant("effect"));
   for (const id of ["recOrder", "recCurve", "recEffect", "recEffectTime"]) $(id).addEventListener("input", () => Picker.refresh());
 })();
