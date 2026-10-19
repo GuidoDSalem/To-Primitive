@@ -50,6 +50,7 @@ var numWorkers = runtime.NumCPU()
 
 type server struct {
 	dataDir string
+	lib     *library
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -60,6 +61,7 @@ type server struct {
 func main() {
 	addr := flag.String("addr", envOr("ADDR", ":8080"), "listen address")
 	dataDir := flag.String("data", envOr("DATA_DIR", filepath.Join(os.TempDir(), "to-primitive")), "directory for uploaded videos")
+	reelsDir := flag.String("reels", envOr("REELS_DIR", "reels"), "directory where finished reels are kept")
 	flag.Parse()
 
 	// Videos don't survive a restart (sessions live in memory), so start clean.
@@ -67,10 +69,23 @@ func main() {
 	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
 		log.Fatal(err)
 	}
+	// Finished reels do survive: never cleaned up here.
+	if err := os.MkdirAll(*reelsDir, 0o755); err != nil {
+		log.Fatal(err)
+	}
 
-	srv := &server{dataDir: *dataDir, sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
+	srv := newServer(*dataDir, *reelsDir)
+	log.Printf("To-Primitive listening on %s (reels in %s)", *addr, *reelsDir)
+	log.Fatal(http.ListenAndServe(*addr, srv.routes()))
+}
+
+func newServer(dataDir, reelsDir string) *server {
+	return &server{dataDir: dataDir, lib: &library{dir: reelsDir},
+		sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
+}
+
+func (srv *server) routes() http.Handler {
 	web, _ := fs.Sub(webFS, "web")
-
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(web))
 	mux.HandleFunc("POST /api/sessions", srv.create)
@@ -94,8 +109,12 @@ func main() {
 	mux.HandleFunc("PUT /api/live/{id}/params", srv.withLive(srv.liveParams))
 	mux.HandleFunc("DELETE /api/live/{id}", srv.withLive(srv.closeLive))
 
-	log.Printf("To-Primitive listening on %s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	mux.HandleFunc("POST /api/reels/mux", srv.reelMux)
+	mux.HandleFunc("POST /api/reels", srv.reelSave)
+	mux.HandleFunc("GET /api/reels", srv.reelList)
+	mux.HandleFunc("GET /api/reels/{id}/video", srv.reelVideo)
+	mux.HandleFunc("DELETE /api/reels/{id}", srv.reelDelete)
+	return mux
 }
 
 func envOr(key, def string) string {

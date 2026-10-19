@@ -247,7 +247,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/videos/{id}/frame?t=1.5&size=320` | Frame crudo en JPEG (previsualización) |
 | `POST /api/videos/{id}/frames` | Crea una sesión de edición sobre el frame `t` |
 | `GET /api/videos/{id}/events` | Stream SSE: `job` (progreso), `animation` (dimensiones y fondo) y `keyframe` (cada keyframe calculado) |
-| `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`, `flow`) |
+| `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`, `flow`; opcionalmente una porción con `start` y `length` en segundos, y un recorte `crop: {x, y, w, h}` en fracciones del cuadro) |
 | `DELETE /api/videos/{id}/compute` | Cancela el cálculo |
 | `GET /api/videos/{id}/keyframes` | Todos los keyframes calculados hasta el momento (JSON) |
 | `GET /api/videos/{id}/source` | El video original (audio y reloj del reproductor) |
@@ -257,6 +257,13 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/live/{id}/frame` | Un frame de la cámara (JPEG); header `X-Capture-Time` con el reloj del navegador |
 | `PUT /api/live/{id}/params` | Cambia los parámetros (`restart: true` empieza de nuevo) |
 | `DELETE /api/live/{id}` | Cierra la sesión (también se cierra sola a los 10 s sin nadie mirando) |
+| `POST /api/reels/mux` | Agrega el audio a un reel codificado en el navegador. Campos: `video`; opcionales `audio` (archivo propio) o `source` (id de un video subido, con `sourceStart`), más `audioStart`, `volume` y `fadeOut`. El audio se recorta a la duración del video, se rellena con silencio si es más corto y termina con un fundido |
+| `POST /api/reels` | Guarda un reel terminado en la biblioteca (campos `video` y `meta`, un JSON libre: template, duración, ajustes…) |
+| `GET /api/reels` | Lista la biblioteca, del más nuevo al más viejo |
+| `GET /api/reels/{id}/video` | El MP4 de un reel (`?download=1` para descargarlo) |
+| `DELETE /api/reels/{id}` | Borra un reel de la biblioteca |
+
+La biblioteca de reels vive en `REELS_DIR` (o `-reels`), por defecto `./reels`. A diferencia de los archivos subidos, no se borra al reiniciar. En Docker es el volumen `reels` (montado en `/reels`).
 
 ### Formato de los keyframes
 
