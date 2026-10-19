@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive · Editor de reels</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="reels.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Editor de reels</h1>
+      <p class="sub">Foto o video → reel vertical listo para publicar · <a href="/">ir al editor</a></p>
+    </header>
+
+    <section>
+      <h2>1 · Fuente</h2>
+      <label class="button wide">
+        <input id="file" type="file" accept="image/*,video/*" hidden>
+        Subir foto o video…
+      </label>
+      <p id="sourceInfo" class="hint">También podés arrastrarla a la vista previa.</p>
+
+      <div id="portion" hidden>
+        <div class="field">
+          <label>Porción del video <output id="portionOut"></output></label>
+          <div class="portion">
+            <div id="portionBar" class="portion-bar"><div id="portionSel" class="portion-sel"></div></div>
+            <input id="pStart" type="range" min="0" max="1" step="0.05" value="0" aria-label="Inicio">
+            <input id="pEnd" type="range" min="0" max="1" step="0.05" value="1" aria-label="Fin">
+          </div>
+          <p class="hint">Mové los extremos para elegir el inicio y el fin. Máximo 60 s.</p>
+        </div>
+      </div>
+    </section>
+
+    <fieldset id="controls" disabled>
+      <section>
+        <h2>2 · Encuadre vertical (9:16)</h2>
+        <div id="fitMode" class="chips">
+          <button data-value="fill" class="on">Llenar (recortar)</button>
+          <button data-value="fit">Ajustar (fondo desenfocado)</button>
+        </div>
+        <div id="fillControls">
+          <div class="field" style="margin-top:12px">
+            <label for="zoom">Zoom <output id="zoomOut"></output></label>
+            <input id="zoom" type="range" min="1" max="3" step="0.01" value="1">
+          </div>
+          <div class="row">
+            <div class="field wide">
+              <label for="panX">Horizontal</label>
+              <input id="panX" type="range" min="0" max="1" step="0.001" value="0.5">
+            </div>
+            <div class="field wide">
+              <label for="panY">Vertical</label>
+              <input id="panY" type="range" min="0" max="1" step="0.001" value="0.5">
+            </div>
+          </div>
+          <p class="hint">También podés arrastrar la vista previa para mover el encuadre, y usar la rueda del mouse para el zoom.</p>
+        </div>
+        <label class="check"><input id="safeZones" type="checkbox" checked> Mostrar zonas que tapan las apps</label>
+      </section>
+
+      <section>
+        <h2>3 · Formas</h2>
+        <div class="field">
+          <label for="shapes">Cantidad <output id="shapesOut"></output></label>
+          <input id="shapes" type="range" min="20" max="600" step="10" value="150">
+        </div>
+        <div class="field">
+          <label>Tipo</label>
+          <div id="mode" class="chips">
+            <button data-value="1" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 21 20H3z"/></svg>Triángulo</button>
+            <button data-value="2"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12"/></svg>Rectángulo</button>
+            <button data-value="5"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="10" transform="rotate(-25 12 12)"/></svg>Rect. rotado</button>
+            <button data-value="3"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="6"/></svg>Elipse</button>
+            <button data-value="7"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/></svg>Elipse rotada</button>
+            <button data-value="4"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>Círculo</button>
+            <button data-value="6"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18Q12 -2 21 16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>Bézier</button>
+            <button data-value="8"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9 11 3l9 5-2 11-10 2z"/></svg>Polígono</button>
+            <button data-value="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20 9 9l6 11z"/><circle cx="17" cy="8" r="5"/></svg>Combinado</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="inputSize">Resolución de cálculo <output id="inputSizeOut"></output></label>
+          <input id="inputSize" type="range" min="96" max="384" step="16" value="256">
+          <p class="hint">Más alta = más detalle, más lento. La salida siempre es 1080×1920.</p>
+        </div>
+        <button id="generate" class="wide primary">Generar formas</button>
+        <progress id="genProgress" max="1" value="0" hidden></progress>
+        <p id="genStatus" class="hint"></p>
+      </section>
+    </fieldset>
+
+    <footer id="stats">Sin fuente</footer>
+  </aside>
+
+  <main id="stage" class="reel-stage">
+    <div id="phoneBox" class="phone-box">
+      <div id="phone" class="phone">
+        <canvas id="preview" width="540" height="960"></canvas>
+        <canvas id="overlay" width="540" height="960"></canvas>
+        <div id="dropHint" class="drop-hint"><p><strong>Arrastrá una foto o un video</strong><br>o usá “Subir foto o video…”</p></div>
+      </div>
+    </div>
+    <div id="reelBar" class="reel-bar">
+      <button id="play" title="Reproducir / pausar (barra espaciadora)">▶</button>
+      <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+      <span id="clock">0:00.0 / 0:00.0</span>
+      <div id="viewMode" class="chips">
+        <button data-value="shapes" class="on" disabled>Formas</button>
+        <button data-value="original">Original</button>
+      </div>
+    </div>
+    <video id="srcVideo" muted playsinline preload="auto" hidden></video>
+  </main>
+
+  <script src="motion.js"></script>
+  <script src="build.js"></script>
+  <script src="reels.js"></script>
+</body>
+</html>

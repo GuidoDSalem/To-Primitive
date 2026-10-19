@@ -138,6 +138,23 @@ En el navegador, con cámara simulada en Chrome:
 - 100 formas a 128 px: ~11 keyframes/s, con ~200 ms de retraso en pantalla.
 - 50 formas: ~16 keyframes/s, con ~140 ms de retraso.
 
+## Editor de reels (en construcción)
+
+`/reels.html` (enlace "editor de reels" arriba del panel) arma un reel vertical a partir de una foto o un tramo de video.
+
+1. **Fuente.** Subí o arrastrá una foto o un video. En los videos elegís la porción con los dos extremos de la barra: hasta 60 s, como mínimo 0,5 s.
+2. **Encuadre 9:16.**
+   - *Llenar* recorta: zoom, posición, y también arrastrar la vista previa o usar la rueda del mouse.
+   - *Ajustar* muestra la fuente completa sobre una copia desenfocada.
+   - Las zonas rojas marcan lo que tapan TikTok, Reels y Shorts (barra superior, texto de la cuenta, botones). Conviene dejar lo importante fuera de ellas.
+3. **Formas.** Cantidad, tipo y resolución de cálculo.
+   - En las fotos el recorte se aplica antes de calcular, así las formas cubren justo el cuadro.
+   - En los videos se calculan los keyframes solo para la porción y el recorte elegidos, con flujo óptico.
+
+La vista previa reproduce las formas o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo.
+
+Próximas entregas: templates (Revelado, Loop hipnótico, Video en formas), textos, audio y exportación a 1080×1920 con biblioteca de reels.
+
 ## Video
 
 1. **Subí un video.** Se abre el editor sobre un frame de la mitad.

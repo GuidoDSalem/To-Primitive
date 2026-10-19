@@ -1,0 +1,47 @@
+/* Reel editor: vertical preview and portion timeline, on top of style.css. */
+
+.sub a { color: var(--accent); }
+
+.reel-stage { display: flex; flex-direction: column; gap: 12px; }
+.phone-box { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; }
+.phone.dragging { outline: 2px dashed var(--accent); outline-offset: 6px; }
+
+/* 9:16, as large as fits; the canvases fill it. */
+.phone {
+  position: relative; aspect-ratio: 9 / 16; height: 100%; max-width: 100%;
+  border-radius: 18px; overflow: hidden; background: #000;
+  box-shadow: 0 0 0 1px var(--line), 0 12px 40px #0008;
+}
+.phone canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#preview { cursor: grab; }
+#preview.panning { cursor: grabbing; }
+#overlay { pointer-events: none; }
+.drop-hint {
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  color: var(--muted); background: var(--bg); border: 2px dashed var(--line); border-radius: 18px;
+}
+
+.reel-bar { display: flex; align-items: center; gap: 10px; height: 36px; }
+.reel-bar #seek { flex: 1; }
+.reel-bar .chips button { padding: 4px 8px; }
+
+/* Portion of the video: two thumbs on one track. */
+.portion { position: relative; height: 28px; }
+.portion-bar { position: absolute; left: 0; right: 0; top: 11px; height: 6px; border-radius: 3px; background: var(--line); }
+.portion-sel { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
+.portion input[type=range] {
+  position: absolute; inset: 0; width: 100%; margin: 0; background: none; pointer-events: none;
+  -webkit-appearance: none; appearance: none;
+}
+.portion input[type=range]::-webkit-slider-thumb {
+  pointer-events: auto; -webkit-appearance: none; width: 14px; height: 22px; border-radius: 4px;
+  background: var(--text); border: 2px solid var(--accent); cursor: ew-resize;
+}
+.portion input[type=range]::-moz-range-thumb {
+  pointer-events: auto; width: 12px; height: 20px; border-radius: 4px;
+  background: var(--text); border: 2px solid var(--accent); cursor: ew-resize;
+}
+.portion input[type=range]::-webkit-slider-runnable-track { background: none; }
+.portion input[type=range]::-moz-range-track { background: none; }
+
+.stale { color: #f2b45c; }
