@@ -133,11 +133,12 @@ const portionFactor = () => (templateId() === "loop" ? 2 : 1);
 function composition(id = templateId()) {
   if (!reel.gen || stale() || !Templates.LIST[id].kinds.includes(reel.kind)) return null;
   const hasClosing = !!$("tClosing").value.trim();
-  const key = [id, reel.kind === "image" ? reelSeconds() : 0, hasClosing].join("|");
+  const build = buildOpts(), interp = $("interp").value;
+  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, hasClosing, build, interp]);
   const cache = (reel.gen.comps ??= new Map());
   if (!cache.has(key)) {
     cache.set(key, Templates.make(id, {
-      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, duration: reelSeconds(), hasClosing,
+      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, duration: reelSeconds(), hasClosing, build, interp,
       paintOriginal: (ctx, w, h) => paintOriginal(ctx, w, h, true),
     }));
   }
@@ -150,35 +151,72 @@ function renderReel(ctx, comp, t, W, H, bufs) {
   Templates.draw(ctx, W, H, texts(), comp.textAlpha(t));
 }
 
-// ---------- generation ----------
+// ---------- shape parameters (as in the editor) ----------
 
 function params() {
   return {
     shapes: +$("shapes").value,
     mode: +document.querySelector("#mode .on").dataset.value,
-    alpha: 128, repeat: 0,
+    alpha: $("alphaAuto").checked ? 0 : +$("alpha").value,
+    repeat: +$("repeat").value,
     inputSize: +$("inputSize").value,
-    background: "",
+    background: $("bgAuto").checked ? "" : $("background").value,
   };
 }
 
-// Everything the shapes depend on: when it changes, they must be regenerated.
+// Video-only computation settings.
+const videoOpts = () => ({ kfps: +$("kfps").value, adapt: +$("adapt").value, flow: $("videoFlow").checked });
+
+// How the photo's shapes appear (the editor's recording options).
+const buildOpts = () => ({
+  order: $("recOrder").value, curve: $("recCurve").value, effect: $("recEffect").value, effectTime: +$("recEffectTime").value,
+});
+
+// Everything the reel's shapes depend on: when it changes, they must be
+// found again (photos: automatically; videos: "Calcular el video").
 function genKey() {
   return JSON.stringify({
-    kind: reel.kind, mode: reel.framing.mode, crop: crop(), params: params(),
-    portion: reel.kind === "video" ? reel.portion : null,
+    kind: reel.kind, name: reel.name, mode: reel.framing.mode, crop: crop(), params: params(),
+    video: reel.kind === "video" ? { portion: reel.portion, ...videoOpts() } : null,
   });
 }
 const stale = () => !!reel.gen && reel.gen.key !== genKey();
 
-function setProgress(fraction, text) {
-  $("genProgress").hidden = fraction === null;
-  if (fraction !== null) $("genProgress").value = fraction;
-  $("genStatus").textContent = text;
+// ---------- live shapes ----------
+
+// Like the editor: a session on the framed photo (or on a test frame of the
+// video) keeps finding shapes, and every parameter change shows at once.
+// For photos, its finished result is the reel's shapes.
+const live = {
+  token: 0,       // bumps on every new session, to drop stale answers
+  id: null, es: null,
+  key: null,      // the image it works on (source, framing, test frame)
+  g: null,        // current run of the session
+  img: null,      // { width, height, background, shapes, scores, baseScore }
+  running: false, count: 0, paused: false,
+  runKey: null,   // params() the current run is known to follow
+  sentKey: null,  // params() last sent
+  waitG: null,    // after a restarting change: the old run, until a new one starts
+};
+const paramsKey = () => JSON.stringify(params());
+const algoKey = (k) => { const p = JSON.parse(k); delete p.shapes; return JSON.stringify(p); };
+
+function testTime() {
+  return reel.kind === "video" ? clamp(+$("testFrame").value, reel.portion.start, reel.portion.end) : 0;
+}
+const liveImageKey = () => JSON.stringify({ name: reel.name, url: reel.url, mode: reel.framing.mode, crop: crop(), t: testTime() });
+
+function closeLive() {
+  live.es?.close();
+  if (live.id) {
+    // Free the CPU: the server drops old sessions by itself later.
+    api(`/api/sessions/${live.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: true }) }).catch(() => {});
+  }
+  Object.assign(live, { token: live.token + 1, id: null, es: null, key: null, g: null, img: null, running: false, count: 0, runKey: null, sentKey: null, waitG: null });
 }
 
-// Photo: crop it as framed and let an image session find the shapes.
-async function generateImage(p) {
+// The framed photo as a JPEG (the session works on exactly that).
+async function framedPhoto() {
   const [w, h] = sourceSize();
   const c = crop() ?? { x: 0, y: 0, w: 1, h: 1 };
   const sw = c.w * w, sh = c.h * h;
@@ -187,52 +225,166 @@ async function generateImage(p) {
   cv.width = Math.max(1, Math.round(sw * scale));
   cv.height = Math.max(1, Math.round(sh * scale));
   cv.getContext("2d").drawImage(reel.img, c.x * w, c.y * h, sw, sh, 0, 0, cv.width, cv.height);
-  const blob = await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.92));
-  const form = new FormData();
-  form.append("image", blob, "reel.jpg");
-  form.append("params", JSON.stringify(p));
-  const d = await api("/api/sessions", { method: "POST", body: form });
+  return new Promise((r) => cv.toBlob(r, "image/jpeg", 0.92));
+}
 
-  return new Promise((resolve, reject) => {
-    const es = new EventSource(`/api/sessions/${d.id}/events`);
-    const img = { width: 0, height: 0, background: "#000", shapes: [], scores: [], baseScore: 1 };
-    let gen = null;
-    const count = () => img.shapes.filter(Boolean).length;
-    const progress = () => setProgress(Math.min(1, count() / p.shapes), `Buscando formas: ${Math.min(count(), p.shapes)} / ${p.shapes}`);
-    const check = (running, n) => {
-      if (running || n < p.shapes) return;
-      es.close();
-      resolve({ ...img, shapes: img.shapes.slice(0, p.shapes), scores: img.scores.slice(0, p.shapes) });
-    };
-    es.addEventListener("snapshot", (e) => {
-      const s = JSON.parse(e.data);
-      gen = s.g;
-      Object.assign(img, { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore });
-      img.shapes = s.data.slice();
-      img.scores = s.scores.slice();
-      progress();
-      check(s.running, s.data.length);
-    });
-    es.addEventListener("shape", (e) => {
-      const s = JSON.parse(e.data);
-      if (s.g !== gen) return;
-      img.shapes[s.i] = s.data;
-      img.scores[s.i] = s.score;
-      progress();
-    });
-    es.addEventListener("status", (e) => {
-      const s = JSON.parse(e.data);
-      if (s.g === gen) check(s.running, s.count);
-    });
-    reel.generating = { cancel: () => { es.close(); reject(new DOMException("cancelado", "AbortError")); } };
+async function startLive() {
+  if (!reel.kind) return;
+  const key = liveImageKey();
+  if (live.key === key && live.id) return;
+  closeLive();
+  live.key = key;
+  const token = live.token;
+  const p = { ...params(), paused: live.paused };
+  let d;
+  try {
+    if (reel.kind === "image") {
+      const form = new FormData();
+      form.append("image", await framedPhoto(), "reel.jpg");
+      form.append("params", JSON.stringify(p));
+      d = await api("/api/sessions", { method: "POST", body: form });
+    } else {
+      d = await api(`/api/videos/${reel.video.id}/frames`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ t: testTime(), params: p, crop: crop() }),
+      });
+    }
+  } catch (e) {
+    if (token === live.token) $("liveStatus").textContent = "Error: " + e.message;
+    return;
+  }
+  if (token !== live.token) return; // superseded meanwhile
+  live.id = d.id;
+  live.sentKey = live.runKey = paramsKey();
+  const es = new EventSource(`/api/sessions/${d.id}/events`);
+  live.es = es;
+  es.addEventListener("snapshot", (e) => {
+    const s = JSON.parse(e.data);
+    if (live.waitG !== null && s.g !== live.waitG) {
+      live.waitG = null;
+      live.runKey = live.sentKey;
+    }
+    live.g = s.g;
+    live.img = { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore, shapes: s.data.slice(), scores: s.scores.slice() };
+    live.running = s.running;
+    live.count = s.data.length;
+    if ($("bgAuto").checked) $("background").value = s.background;
+    liveChanged();
+  });
+  es.addEventListener("shape", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== live.g || !live.img) return;
+    live.img.shapes[s.i] = s.data;
+    live.img.scores[s.i] = s.score;
+    live.count = Math.max(live.count, s.i + 1);
+    liveChanged();
+  });
+  es.addEventListener("status", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== live.g) return;
+    live.running = s.running;
+    live.count = s.count;
+    liveChanged();
   });
 }
 
-// Video: compute keyframes for the chosen portion and framing.
+// Reframing or another test frame needs a new session (once the hand stops).
+let restartTimer = 0;
+function restartLiveSoon() {
+  clearTimeout(restartTimer);
+  restartTimer = setTimeout(startLive, 350);
+}
+
+// Parameter changes go to the running session, as in the editor.
+let paramsTimer = 0;
+function sendParams() {
+  refreshUI();
+  if (!live.id) return;
+  clearTimeout(paramsTimer);
+  paramsTimer = setTimeout(async () => {
+    const id = live.id, key = paramsKey();
+    if (!id || key === live.sentKey) return;
+    const restarts = algoKey(key) !== algoKey(live.sentKey);
+    live.sentKey = key;
+    try {
+      await api(`/api/sessions/${id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: live.paused }) });
+    } catch { return; }
+    if (id !== live.id || key !== live.sentKey) return;
+    if (restarts) live.waitG = live.g; // the new run announces itself with a snapshot
+    else live.runKey = key;
+    liveChanged();
+  }, 120);
+}
+
+// The live session moved on: redraw, and for photos take its finished
+// result as the reel's shapes.
+let liveDraw = 0;
+function liveChanged() {
+  const target = params().shapes;
+  if (reel.kind === "image" && live.img && !live.running && live.count >= target &&
+      live.key === liveImageKey() && live.runKey === paramsKey() && live.waitG === null) {
+    const key = genKey();
+    if (reel.gen?.key !== key) {
+      const im = live.img;
+      reel.gen = { key, image: { ...im, shapes: im.shapes.slice(0, target), scores: im.scores.slice(0, target) } };
+      Picker.refresh();
+      // The first time, show the reel right away.
+      if (!reel.shown) {
+        reel.shown = true;
+        setView("reel");
+        player.seek(0);
+        player.play();
+      }
+    }
+  }
+  if (!liveDraw) {
+    liveDraw = requestAnimationFrame(() => {
+      liveDraw = 0;
+      refreshUI();
+      if (!player.playing) player.draw();
+      Picker.refreshSoon();
+    });
+  }
+}
+
+$("pause").addEventListener("click", () => {
+  live.paused = !live.paused;
+  if (live.id) {
+    api(`/api/sessions/${live.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: live.paused }) }).catch(() => {});
+  }
+  refreshUI();
+});
+
+// The live shapes, filling w x h.
+function paintLive(ctx, w, h) {
+  const im = live.img;
+  if (!im) {
+    paintOriginal(ctx, w, h);
+    return;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = im.background;
+  ctx.fillRect(0, 0, w, h);
+  const sx = w / im.width, sy = h / im.height;
+  ctx.setTransform(sx, 0, 0, sy, 0.5 * sx, 0.5 * sy);
+  const n = Math.min(params().shapes, im.shapes.length);
+  for (let i = 0; i < n; i++) if (im.shapes[i]) Motion.drawShape(ctx, im.shapes[i], 1);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+// ---------- video computation ----------
+
+function setProgress(fraction, text) {
+  $("genProgress").hidden = fraction === null;
+  if (fraction !== null) $("genProgress").value = fraction;
+  $("genStatus").textContent = text;
+}
+
+// Compute the keyframes for the chosen portion and framing.
 async function generateVideo(p) {
   const v = reel.video;
   const body = {
-    ...p, kfps: 8, adapt: 60, flow: true,
+    ...p, ...videoOpts(),
     start: reel.portion.start, length: reel.portion.end - reel.portion.start, crop: crop(),
   };
   return new Promise((resolve, reject) => {
@@ -280,13 +432,13 @@ $("generate").addEventListener("click", async () => {
     return;
   }
   const key = genKey();
-  const p = params();
   $("generate").textContent = "Cancelar";
   setProgress(0, "Preparando…");
+  // Free the CPU for the computation, as the editor does.
+  if (!live.paused) $("pause").click();
   const started = performance.now();
   try {
-    if (reel.kind === "image") reel.gen = { key, image: await generateImage(p) };
-    else reel.gen = { key, anim: await generateVideo(p) };
+    reel.gen = { key, anim: await generateVideo(params()) };
     setProgress(null, `Listo en ${((performance.now() - started) / 1000).toFixed(1)} s.`);
     setView("reel");
     player.seek(0);
@@ -295,14 +447,14 @@ $("generate").addEventListener("click", async () => {
     setProgress(null, e.name === "AbortError" ? "Cancelado." : "Error: " + e.message);
   } finally {
     reel.generating = null;
-    $("generate").textContent = "Generar formas";
+    $("generate").textContent = "Calcular el video";
     refreshUI();
   }
 });
 
 // ---------- preview player ----------
 
-let view = "original"; // what the preview shows: "reel" or "original"
+let view = "shapes"; // what the preview shows: "reel", "shapes" (live) or "original"
 
 function setView(v) {
   view = v;
@@ -332,7 +484,7 @@ const player = (() => {
   function syncVideo(play) {
     if (reel.kind !== "video") return;
     const comp = shownReel();
-    const vt = comp ? comp.videoTime(t) : t;
+    const vt = comp ? comp.videoTime(t) : view === "original" ? t : null;
     if (vt === null) {
       srcVideo.pause();
       return;
@@ -388,6 +540,8 @@ const player = (() => {
       ctx.fillRect(0, 0, w, h);
     } else if (comp) {
       renderReel(ctx, comp, t, w, h);
+    } else if (view === "shapes") {
+      drawFramed(ctx, w, h, paintLive);
     } else {
       drawFramed(ctx, w, h, paintOriginal);
     }
@@ -593,9 +747,10 @@ async function loadSource(file) {
     return;
   }
   reel.generating?.cancel();
+  closeLive();
   player.pause();
   if (reel.url) URL.revokeObjectURL(reel.url);
-  Object.assign(reel, { kind: null, name: file.name, url: URL.createObjectURL(file), img: null, video: null, gen: null });
+  Object.assign(reel, { kind: null, name: file.name, url: URL.createObjectURL(file), img: null, video: null, gen: null, shown: false });
   reel.framing = { mode: reel.framing.mode, zoom: 1, px: 0.5, py: 0.5 };
   $("stats").textContent = isVideo ? "Subiendo el video…" : "Cargando la foto…";
   setProgress(null, "");
@@ -629,10 +784,23 @@ async function loadSource(file) {
   if (reel.audio.mode !== "file") reel.audio.mode = reel.video?.info.hasAudio ? "source" : "none";
   const [w, h] = sourceSize();
   $("sourceInfo").textContent = `${file.name} · ${w}×${h}` + (reel.video ? ` · ${fmtTime(reel.video.info.duration)}` + (reel.video.info.hasAudio ? " · con sonido" : "") : "");
-  setView("original");
+  if (reel.video) {
+    fillKFPS(reel.video.info.fps || 30);
+    $("testFrame").value = (reel.portion.start + reel.portion.end) / 2; // as the editor: a frame from the middle
+  }
+  closeLive();
+  setView("shapes");
   syncFramingInputs();
   refreshUI();
   player.seek(0);
+  startLive();
+}
+
+function fillKFPS(fps) {
+  const keep = +$("kfps").value || 8;
+  const opts = [4, 6, 8, 10, 12, 15, 24, 30].filter((f) => f <= fps + 0.5);
+  $("kfps").replaceChildren(...opts.map((f) => new Option(String(f), f)));
+  $("kfps").value = String(opts.includes(keep) ? keep : opts.at(-1) ?? 4);
 }
 
 $("file").addEventListener("change", (e) => {
@@ -655,7 +823,22 @@ function setPortion(s, e) {
   reel.portion = { start: Math.round(s * 100) / 100, end: Math.round(e * 100) / 100 };
   $("pStart").value = reel.portion.start;
   $("pEnd").value = reel.portion.end;
+  // The test frame stays inside the portion (in the middle when it was out).
+  const tf = $("testFrame"), old = +tf.value;
+  tf.min = reel.portion.start;
+  tf.max = reel.portion.end;
+  if (old < reel.portion.start || old > reel.portion.end) tf.value = (reel.portion.start + reel.portion.end) / 2;
+  if (+tf.value !== old) restartLiveSoon();
 }
+
+$("testFrame").addEventListener("input", () => {
+  // Show it while choosing; the shapes follow once the hand stops.
+  setView("original");
+  player.pause();
+  player.seek(testTime() - reel.portion.start);
+  refreshUI();
+  restartLiveSoon();
+});
 
 function onPortion(changed) {
   const dur = reel.video.info.duration;
@@ -693,6 +876,7 @@ function syncFramingInputs() {
 function framingChanged() {
   refreshUI();
   player.draw();
+  restartLiveSoon();
 }
 
 $("fitMode").addEventListener("click", (e) => {
@@ -751,9 +935,36 @@ $("mode").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   for (const x of $("mode").children) x.classList.toggle("on", x === b);
-  refreshUI();
+  sendParams();
 });
-for (const id of ["shapes", "inputSize"]) $(id).addEventListener("input", refreshUI);
+for (const id of ["shapes", "alpha", "alphaAuto", "repeat", "inputSize", "background", "bgAuto"]) {
+  $(id).addEventListener("input", sendParams);
+}
+// Settings that apply at once, without finding shapes again.
+for (const id of ["kfps", "adapt", "videoFlow", "interp", "recOrder", "recCurve", "recEffect", "recEffectTime"]) {
+  $(id).addEventListener("input", () => {
+    refreshUI();
+    if (!player.playing) player.draw();
+  });
+}
+
+// The recording options with their visual previews, as in the editor.
+(() => {
+  const fill = (id, entries) => $(id).replaceChildren(...entries.map(([v, label]) => new Option(label, v)));
+  fill("recOrder", Object.entries(Build.ORDERS));
+  fill("recCurve", Object.entries(Build.CURVES).map(([k, c]) => [k, c.label]));
+  fill("recEffect", Object.entries(Build.EFFECTS));
+  $("recCurve").value = "outCubic";
+  $("recEffect").value = "fade";
+  // Previews use the current shapes: short loops, so each card tells its story fast.
+  const thumb = () => reel.gen?.image ?? (live.img && reel.kind === "image" ? { ...live.img, shapes: live.img.shapes.filter(Boolean) } : null);
+  const quick = () => ({ direction: "build", ...buildOpts(), duration: 2.2, holdStart: 0.2, holdEnd: 0.8, effectTime: Math.min(+$("recEffectTime").value, 0.6) });
+  const variant = (key) => (value) => (thumb()?.shapes.length ? Build.plan(thumb(), { ...quick(), [key]: value }) : null);
+  Picker.attach($("recOrder"), variant("order"));
+  Picker.attach($("recCurve"), variant("curve"));
+  Picker.attach($("recEffect"), variant("effect"));
+  for (const id of ["recOrder", "recCurve", "recEffect", "recEffectTime"]) $(id).addEventListener("input", () => Picker.refresh());
+})();
 
 // ---------- state shown in the panel ----------
 
@@ -766,7 +977,28 @@ function refreshUI() {
   $("zoomOut").textContent = (+reel.framing.zoom).toFixed(2) + "×";
   $("shapesOut").textContent = $("shapes").value;
   $("inputSizeOut").textContent = $("inputSize").value + " px";
+  $("alphaOut").textContent = $("alphaAuto").checked ? "auto" : $("alpha").value;
+  $("alpha").disabled = $("alphaAuto").checked;
+  $("repeatOut").textContent = $("repeat").value;
+  $("background").disabled = $("bgAuto").checked;
+  $("adaptOut").textContent = $("adapt").value;
+  $("recEffectTimeOut").textContent = (+$("recEffectTime").value).toFixed(2) + " s";
+  $("recEffectTime").disabled = $("recEffect").value === "none";
+  $("photoAnim").hidden = reel.kind === "video";
+  $("videoAnim").hidden = reel.kind !== "video";
+  $("testFrameBox").hidden = reel.kind !== "video";
+  if (reel.kind === "video") $("testFrameOut").textContent = fmtTime(testTime());
   drawOverlay();
+
+  // The live session, as in the editor.
+  const target = +$("shapes").value;
+  $("pause").textContent = live.paused ? "Continuar" : "Pausar";
+  if (has) {
+    const n = Math.min(live.count, target);
+    $("liveStatus").textContent = !live.id ? "Preparando…"
+      : `Formas: ${n} / ${target} · ` + (live.paused ? "en pausa" : live.running ? "buscando…" : n >= target ? "listas" : "detenido") +
+        (reel.kind === "image" && reel.gen && !stale() ? " · el reel ya las usa" : "");
+  }
 
   // Template and duration.
   const tpl = Templates.LIST[templateId()];
@@ -802,15 +1034,14 @@ function refreshUI() {
   const comp = composition();
   if (!exporting) {
     $("export").disabled = !comp;
-    if (has && !comp) $("expStatus").textContent = "Generá las formas para poder exportar.";
+    if (has && !comp) $("expStatus").textContent = reel.kind === "image" ? "Esperá a que estén todas las formas para exportar." : "Calculá el video para poder exportar.";
     else if (has && !$("expStatus").dataset.done) $("expStatus").textContent = `Reel de ${comp.duration.toFixed(1)} s · ${Templates.LIST[comp.id].name} · 1080×1920, 30 fps.`;
   }
   $("viewMode").querySelector('[data-value="reel"]').disabled = !comp;
-  if (view === "reel" && !comp) setView("original");
-  if (!reel.generating) {
-    if (!has) $("genStatus").textContent = "";
-    else if (stale()) $("genStatus").innerHTML = '<span class="stale">Cambiaste el encuadre, la porción o los ajustes: generá de nuevo para ver el reel.</span>';
-    else if (!reel.gen) $("genStatus").textContent = "Elegí el encuadre y generá las formas.";
+  if (view === "reel" && !comp) setView("shapes");
+  if (!reel.generating && reel.kind === "video") {
+    if (stale()) $("genStatus").innerHTML = '<span class="stale">Cambiaste el encuadre, el tramo o los ajustes: calculá el video de nuevo para ver el reel.</span>';
+    else if (!reel.gen) $("genStatus").textContent = "Cuando te guste cómo queda en los frames de prueba, calculá el video.";
   }
   if (has) {
     const c = crop();
@@ -863,6 +1094,7 @@ function reelMeta(comp, res, seconds) {
     source: { kind: reel.kind, name: reel.name, size: sourceSize(), portion: reel.kind === "video" ? { ...reel.portion } : null },
     framing: { ...reel.framing }, crop: crop(),
     shapes: params(),
+    animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
     texts: texts(),
     audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
     export: { width: res.width, height: res.height, fps: 30, codec: res.codec, seconds: Math.round(seconds * 10) / 10 },

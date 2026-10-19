@@ -52,7 +52,9 @@ const Templates = (() => {
   }
 
   // src: { kind, image (photo shapes) | anim (video keyframes), duration (photo),
-  //        hasClosing, paintOriginal(ctx, w, h) }
+  //        hasClosing, paintOriginal(ctx, w, h),
+  //        build: { order, curve, effect, effectTime } (photos, as in the
+  //        editor's recording), interp: "smooth" | "linear" | "step" (videos) }
   // Returns { id, duration, paint(ctx, t, w, h), videoTime(t), originalFrom,
   // textAlpha(t) }: paint fills w x h with the content (no texts), videoTime
   // says which second of the portion the original video shows (null = none),
@@ -60,12 +62,14 @@ const Templates = (() => {
   // gives the visibility of the title and the closing.
   function make(id, src) {
     const scratch = new Map();
+    const b = { order: "original", curve: "outCubic", effect: "fade", effectTime: 0.6, ...src.build };
+    const interp = src.interp || "smooth";
     if (id === "reveal") {
       const D = src.duration;
       const B = 0.5 * D, F = 0.62 * D, X = clamp(0.1 * D, 0.6, 2.5);
       const plan = Build.plan(src.image, {
-        direction: "build", order: "original", curve: "outCubic", effect: "fade",
-        effectTime: Math.min(0.6, B * 0.2), duration: B, holdStart: 0.2, holdEnd: D,
+        direction: "build", order: b.order, curve: b.curve, effect: b.effect,
+        effectTime: Math.min(b.effectTime, B * 0.4), duration: B, holdStart: 0.2, holdEnd: D,
       });
       return {
         id, duration: D, videoTime: () => null, originalFrom: F,
@@ -85,7 +89,7 @@ const Templates = (() => {
       return {
         id, duration: D, videoTime: (t) => t, originalFrom: D - X,
         paint(ctx, t, w, h) {
-          Motion.render(ctx, src.anim, t, "smooth", w, h);
+          Motion.render(ctx, src.anim, t, interp, w, h);
           overlay(ctx, smooth((t - (D - X)) / X), () => src.paintOriginal(ctx, w, h));
         },
         textAlpha: (t) => src.hasClosing
@@ -101,8 +105,9 @@ const Templates = (() => {
       if (src.kind === "image") {
         D = src.duration;
         const plan = Build.plan(src.image, {
-          direction: "build", order: "original", curve: "linear", effect: "fade",
-          effectTime: 0.1, duration: 1, holdStart: 0, holdEnd: 0,
+          // Build time runs 0..1 here: the effect lasts its share of half a loop.
+          direction: "build", order: b.order, curve: "linear", effect: b.effect,
+          effectTime: clamp(b.effectTime / (D / 2), 0.02, 0.5), duration: 1, holdStart: 0, holdEnd: 0,
         });
         const MIN = 0.06; // part of the shapes left at the simplest point
         frame = (ctx, t, w, h, c) => plan.render(ctx, MIN + (1 - MIN) * c, w, h);
@@ -110,7 +115,7 @@ const Templates = (() => {
         // Video: forward and back again (boomerang).
         const L = src.anim.duration;
         D = 2 * L;
-        frame = (ctx, t, w, h) => Motion.render(ctx, src.anim, t <= L ? t : 2 * L - t, "smooth", w, h);
+        frame = (ctx, t, w, h) => Motion.render(ctx, src.anim, t <= L ? t : 2 * L - t, interp, w, h);
       }
       return {
         id, duration: D, videoTime: () => null, originalFrom: Infinity,

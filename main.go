@@ -361,12 +361,16 @@ func (srv *server) frameSession(w http.ResponseWriter, r *http.Request, v *Video
 	var body struct {
 		T      float64 `json:"t"`
 		Params *Params `json:"params"`
+		Crop   *Crop   `json:"crop"` // optional framing, as in compute
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	img, err := extractFrame(r.Context(), v.path, body.T, maxFrameSize)
+	if !body.Crop.valid() {
+		body.Crop = nil
+	}
+	img, err := extractCroppedFrame(r.Context(), v.path, body.T, body.Crop, maxFrameSize)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return

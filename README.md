@@ -157,12 +157,16 @@ En el navegador, con cámara simulada en Chrome:
    - *Llenar* recorta: zoom, posición, y también arrastrar la vista previa o usar la rueda del mouse.
    - *Ajustar* muestra la fuente completa sobre una copia desenfocada.
    - Las zonas rojas marcan lo que tapan TikTok, Reels y Shorts (barra superior, texto de la cuenta, botones). Conviene dejar lo importante fuera de ellas.
-5. **Formas.** Cantidad, tipo y resolución de cálculo.
-   - En las fotos el recorte se aplica antes de calcular, así las formas cubren justo el cuadro.
-   - En los videos se calculan los keyframes solo para la porción y el recorte elegidos, con flujo óptico.
-6. **Textos.** Título (el gancho del principio), cierre y marca, todos opcionales. Aparecen con un fundido y un leve movimiento, con sombra, y quedan fuera de las zonas que tapan las apps; si no entran, se achican.
-7. **Audio.** Sin sonido, el sonido del video (el tramo elegido) o un archivo propio, desde el segundo que elijas. Con volumen y fundido de salida. Se escucha al reproducir la vista previa.
-8. **Exportar.** El navegador dibuja cada cuadro a 1080×1920 y 30 fps y lo codifica en H.264 (WebCodecs); el servidor le agrega el audio en AAC (recortado a la duración del reel, rellenado con silencio si es más corto y con el fundido) y lo guarda en la biblioteca. El MP4 se descarga solo y está listo para subir a TikTok, Reels o Shorts. Si el navegador solo puede codificar VP9, el servidor lo convierte a H.264.
+5. **Formas, en vivo como en el editor.** Cantidad y tipo; las formas aparecen en la vista previa mientras se buscan y cada cambio se ve al instante, igual que en el editor principal (con *Pausar / Continuar*).
+   - Fotos: la sesión trabaja sobre la foto ya recortada a 9:16, así las formas cubren justo el cuadro. Cuando están todas, el reel las usa solo; si cambiás algo, se buscan de nuevo y el reel se actualiza al terminar.
+   - Videos: se ajusta sobre un **frame de prueba** del tramo (también recortado); cambiarlo arma otra sesión en ese frame.
+6. **Algoritmo.** Los mismos controles que el editor: opacidad (fija o automática por forma), repetición, resolución de trabajo y fondo (color promedio o elegido).
+7. **Animación.**
+   - Fotos: las opciones de la grabación del editor, con sus tarjetas animadas: orden de aparición, velocidad (curva de easing, en Revelado), efecto y duración del efecto. Se aplican al instante, sin recalcular.
+   - Videos: keyframes por segundo, seguimiento del movimiento, flujo óptico e interpolación. *Calcular el video* procesa el tramo con el recorte elegido (pausa la sesión de prueba para liberar la CPU); si después cambiás algo que afecta el cálculo, avisa que hay que calcular de nuevo. La interpolación se aplica al instante.
+8. **Textos.** Título (el gancho del principio), cierre y marca, todos opcionales. Aparecen con un fundido y un leve movimiento, con sombra, y quedan fuera de las zonas que tapan las apps; si no entran, se achican.
+9. **Audio.** Sin sonido, el sonido del video (el tramo elegido) o un archivo propio, desde el segundo que elijas. Con volumen y fundido de salida. Se escucha al reproducir la vista previa.
+10. **Exportar.** El navegador dibuja cada cuadro a 1080×1920 y 30 fps y lo codifica en H.264 (WebCodecs); el servidor le agrega el audio en AAC (recortado a la duración del reel, rellenado con silencio si es más corto y con el fundido) y lo guarda en la biblioteca. El MP4 se descarga solo y está listo para subir a TikTok, Reels o Shorts. Si el navegador solo puede codificar VP9, el servidor lo convierte a H.264.
 
 **Biblioteca.** Al pie del panel están los reels exportados, del más nuevo al más viejo, para verlos, descargarlos o borrarlos. Cada uno guarda un registro con lo que lo generó: template, duración, fuente, tramo, encuadre, formas, textos, audio y datos de la exportación. Sirve para comparar después qué combinación funciona mejor en las redes.
 
@@ -279,7 +283,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/sessions/{id}/export?format=png\|svg\|gif&size=1024&n=200` | Descarga el resultado |
 | `POST /api/videos` | Sube un video (multipart, campo `video`) |
 | `GET /api/videos/{id}/frame?t=1.5&size=320` | Frame crudo en JPEG (previsualización) |
-| `POST /api/videos/{id}/frames` | Crea una sesión de edición sobre el frame `t` |
+| `POST /api/videos/{id}/frames` | Crea una sesión de edición sobre el frame `t` (opcional `crop`, como en `compute`) |
 | `GET /api/videos/{id}/events` | Stream SSE: `job` (progreso), `animation` (dimensiones y fondo) y `keyframe` (cada keyframe calculado) |
 | `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`, `flow`; opcionalmente una porción con `start` y `length` en segundos, y un recorte `crop: {x, y, w, h}` en fracciones del cuadro) |
 | `DELETE /api/videos/{id}/compute` | Cancela el cálculo |

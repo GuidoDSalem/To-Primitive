@@ -105,18 +105,94 @@
             <button data-value="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20 9 9l6 11z"/><circle cx="17" cy="8" r="5"/></svg>Combinado</button>
           </div>
         </div>
-        <div class="field">
-          <label for="inputSize">Resolución de cálculo <output id="inputSizeOut"></output></label>
-          <input id="inputSize" type="range" min="96" max="384" step="16" value="256">
-          <p class="hint">Más alta = más detalle, más lento. La salida siempre es 1080×1920.</p>
+        <div id="testFrameBox" class="field" hidden>
+          <label for="testFrame">Frame de prueba <output id="testFrameOut"></output></label>
+          <input id="testFrame" type="range" min="0" max="1" step="0.01" value="0">
+          <p class="hint">Ajustá todo sobre algunos frames del tramo y después calculá el video completo.</p>
         </div>
-        <button id="generate" class="wide primary">Generar formas</button>
-        <progress id="genProgress" max="1" value="0" hidden></progress>
-        <p id="genStatus" class="hint"></p>
+        <div class="row">
+          <button id="pause" class="wide">Pausar</button>
+        </div>
+        <p id="liveStatus" class="hint"></p>
       </section>
 
       <section>
-        <h2>6 · Textos</h2>
+        <h2>6 · Algoritmo</h2>
+        <div class="field">
+          <label for="alpha">Opacidad <output id="alphaOut"></output></label>
+          <input id="alpha" type="range" min="1" max="255" value="128">
+          <label class="check"><input id="alphaAuto" type="checkbox"> Automática (por forma)</label>
+        </div>
+        <div class="field">
+          <label for="repeat">Repetición <output id="repeatOut"></output></label>
+          <input id="repeat" type="range" min="0" max="10" value="0">
+          <p class="hint">Formas extra por iteración con búsqueda reducida.</p>
+        </div>
+        <div class="field">
+          <label for="inputSize">Resolución de trabajo <output id="inputSizeOut"></output></label>
+          <input id="inputSize" type="range" min="64" max="512" step="16" value="256">
+          <p class="hint">Más alta = más detalle, pero más lento. La salida siempre es 1080×1920.</p>
+        </div>
+        <div class="field">
+          <label for="background">Fondo</label>
+          <div class="row">
+            <input id="background" type="color" value="#000000">
+            <label class="check"><input id="bgAuto" type="checkbox" checked> Color promedio</label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>7 · Animación</h2>
+        <div id="photoAnim">
+          <div class="field">
+            <label for="recOrder">Orden de aparición</label>
+            <select id="recOrder"></select>
+          </div>
+          <div class="field">
+            <label for="recCurve">Velocidad (curva de easing)</label>
+            <select id="recCurve"></select>
+            <p class="hint">Solo en Revelado: el loop sigue su propio ritmo para empalmar.</p>
+          </div>
+          <div class="field">
+            <label for="recEffect">Efecto de aparición</label>
+            <select id="recEffect"></select>
+          </div>
+          <div class="field">
+            <label for="recEffectTime">Duración del efecto <output id="recEffectTimeOut"></output></label>
+            <input id="recEffectTime" type="range" min="0.05" max="3" step="0.05" value="0.6">
+          </div>
+          <p class="hint">Se aplica al instante, sin recalcular.</p>
+        </div>
+        <div id="videoAnim" hidden>
+          <div class="field">
+            <label for="kfps">Keyframes por segundo</label>
+            <select id="kfps"></select>
+            <p class="hint">Cuántos frames del video se calculan; el movimiento entre ellos se interpola. Menos = más rápido de calcular.</p>
+          </div>
+          <div class="field">
+            <label for="adapt">Seguimiento del movimiento <output id="adaptOut"></output></label>
+            <input id="adapt" type="range" min="0" max="300" step="10" value="60">
+            <label class="check"><input id="videoFlow" type="checkbox" checked> Flujo óptico (las formas siguen el movimiento)</label>
+            <p class="hint">Cada keyframe parte de las formas del anterior. Más alto = las formas siguen mejor el movimiento; 0 = quedan fijas y solo cambian de color.</p>
+          </div>
+          <div class="field">
+            <label for="interp">Interpolación</label>
+            <select id="interp">
+              <option value="smooth">Suave (curva continua)</option>
+              <option value="linear">Lineal</option>
+              <option value="step">Sin interpolar (saltos)</option>
+            </select>
+            <p class="hint">Se aplica al instante, sin recalcular.</p>
+          </div>
+          <button id="generate" class="wide primary">Calcular el video</button>
+          <progress id="genProgress" max="1" value="0" hidden></progress>
+          <p id="genStatus" class="hint"></p>
+        </div>
+      </section>
+
+      <section>
+        <h2>8 · Textos</h2>
         <div class="field">
           <label for="tTitle">Título (gancho del principio)</label>
           <textarea id="tTitle" rows="2" placeholder="Ej.: Esto es la Mona Lisa hecha con 150 triángulos"></textarea>
@@ -133,7 +209,7 @@
       </section>
 
       <section>
-        <h2>7 · Audio</h2>
+        <h2>9 · Audio</h2>
         <div id="audioMode" class="chips">
           <button data-value="none" class="on">Sin sonido</button>
           <button data-value="source">Sonido del video</button>
@@ -165,7 +241,7 @@
       </section>
 
       <section>
-        <h2>8 · Exportar</h2>
+        <h2>10 · Exportar</h2>
         <button id="export" class="wide primary">Exportar reel (MP4 1080×1920)</button>
         <progress id="expProgress" max="1" value="0" hidden></progress>
         <p id="expStatus" class="hint">Se descarga y queda en la biblioteca, con el registro de template, duración y ajustes.</p>
@@ -193,7 +269,8 @@
       <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
       <span id="clock">0:00.0 / 0:00.0</span>
       <div id="viewMode" class="chips">
-        <button data-value="reel" class="on" disabled>Reel</button>
+        <button data-value="reel" disabled>Reel</button>
+        <button data-value="shapes" class="on">Formas</button>
         <button data-value="original">Original</button>
       </div>
     </div>
@@ -204,6 +281,7 @@
   <script src="motion.js"></script>
   <script src="build.js"></script>
   <script src="templates.js"></script>
+  <script src="picker.js"></script>
   <script src="reels.js"></script>
 </body>
 </html>

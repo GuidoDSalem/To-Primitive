@@ -332,3 +332,40 @@ func TestMuxTranscodesAndSaves(t *testing.T) {
 		t.Error("stored reel has no audio")
 	}
 }
+
+// Test frames for tuning a reel use the same framing as the computation.
+func TestFrameSessionCrop(t *testing.T) {
+	needFFmpeg(t)
+	dir := t.TempDir()
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	os.MkdirAll(srv.dataDir, 0o755)
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	body, ct := multipartBody(t, map[string]string{"video": silentVideo(t, dir, 2)}, nil)
+	res, err := http.Post(ts.URL+"/api/videos", ct, body)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("upload: %v %v", err, res.Status)
+	}
+	var v struct{ ID string }
+	json.NewDecoder(res.Body).Decode(&v)
+
+	for _, c := range []struct {
+		crop string
+		w, h int
+	}{
+		{`{"x":0.25,"y":0,"w":0.5,"h":1}`, 160, 240},
+		{`null`, 320, 240},
+		{`{"x":0.8,"y":0,"w":0.5,"h":1}`, 320, 240}, // invalid: ignored
+	} {
+		res, err := http.Post(ts.URL+"/api/videos/"+v.ID+"/frames", "application/json",
+			strings.NewReader(`{"t":1,"crop":`+c.crop+`}`))
+		if err != nil || res.StatusCode != 200 {
+			t.Fatalf("frames %s: %v %v", c.crop, err, res.Status)
+		}
+		var f struct{ Width, Height int }
+		json.NewDecoder(res.Body).Decode(&f)
+		if f.Width != c.w || f.Height != c.h {
+			t.Errorf("crop %s: %dx%d, want %dx%d", c.crop, f.Width, f.Height, c.w, c.h)
+		}
+	}
+}
