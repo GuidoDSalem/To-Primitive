@@ -38,7 +38,29 @@
 
     <fieldset id="controls" disabled>
       <section>
-        <h2>2 · Encuadre vertical (9:16)</h2>
+        <h2>2 · Template</h2>
+        <div id="templates" class="tpl-grid"></div>
+        <p id="tplInfo" class="hint"></p>
+      </section>
+
+      <section>
+        <h2>3 · Duración</h2>
+        <div id="durPreset" class="chips">
+          <button data-value="10">10 s</button>
+          <button data-value="15" class="on">15 s</button>
+          <button data-value="30">30 s</button>
+          <button data-value="60">60 s</button>
+          <button data-value="free">Libre</button>
+        </div>
+        <div id="durFreeBox" class="field" style="margin-top:10px" hidden>
+          <label for="durFree">Segundos</label>
+          <input id="durFree" type="number" min="3" max="90" step="0.5" value="20">
+        </div>
+        <p id="durInfo" class="hint"></p>
+      </section>
+
+      <section>
+        <h2>4 · Encuadre vertical (9:16)</h2>
         <div id="fitMode" class="chips">
           <button data-value="fill" class="on">Llenar (recortar)</button>
           <button data-value="fit">Ajustar (fondo desenfocado)</button>
@@ -64,7 +86,7 @@
       </section>
 
       <section>
-        <h2>3 · Formas</h2>
+        <h2>5 · Formas</h2>
         <div class="field">
           <label for="shapes">Cantidad <output id="shapesOut"></output></label>
           <input id="shapes" type="range" min="20" max="600" step="10" value="150">
@@ -92,6 +114,23 @@
         <progress id="genProgress" max="1" value="0" hidden></progress>
         <p id="genStatus" class="hint"></p>
       </section>
+
+      <section>
+        <h2>6 · Textos</h2>
+        <div class="field">
+          <label for="tTitle">Título (gancho del principio)</label>
+          <textarea id="tTitle" rows="2" placeholder="Ej.: Esto es la Mona Lisa hecha con 150 triángulos"></textarea>
+        </div>
+        <div class="field">
+          <label for="tClosing">Cierre</label>
+          <textarea id="tClosing" rows="2" placeholder="Ej.: ¿Cuál hago mañana? 👇"></textarea>
+        </div>
+        <div class="field">
+          <label for="tBrand">Marca</label>
+          <input id="tBrand" type="text" placeholder="@tucuenta">
+        </div>
+        <p class="hint">Todos opcionales. Se ubican fuera de las zonas que tapan las apps.</p>
+      </section>
     </fieldset>
 
     <footer id="stats">Sin fuente</footer>
@@ -110,7 +149,7 @@
       <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
       <span id="clock">0:00.0 / 0:00.0</span>
       <div id="viewMode" class="chips">
-        <button data-value="shapes" class="on" disabled>Formas</button>
+        <button data-value="reel" class="on" disabled>Reel</button>
         <button data-value="original">Original</button>
       </div>
     </div>
@@ -119,6 +158,7 @@
 
   <script src="motion.js"></script>
   <script src="build.js"></script>
+  <script src="templates.js"></script>
   <script src="reels.js"></script>
 </body>
 </html>

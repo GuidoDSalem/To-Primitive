@@ -45,3 +45,16 @@
 .portion input[type=range]::-moz-range-track { background: none; }
 
 .stale { color: #f2b45c; }
+
+/* Template cards: a small 9:16 preview each. */
+.tpl-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.tpl { display: flex; flex-direction: column; gap: 4px; padding: 4px; text-align: left; }
+.tpl canvas { display: block; width: 100%; aspect-ratio: 9 / 16; border-radius: 4px; background: var(--bg); }
+.tpl span { font-size: 11px; line-height: 1.2; color: var(--muted); }
+.tpl.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.tpl.on span { color: var(--text); }
+
+textarea, input[type=text] {
+  width: 100%; padding: 6px 8px; border-radius: 6px; resize: vertical;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+}

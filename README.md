@@ -143,17 +143,28 @@ En el navegador, con cámara simulada en Chrome:
 `/reels.html` (enlace "editor de reels" arriba del panel) arma un reel vertical a partir de una foto o un tramo de video.
 
 1. **Fuente.** Subí o arrastrá una foto o un video. En los videos elegís la porción con los dos extremos de la barra: hasta 60 s, como mínimo 0,5 s.
-2. **Encuadre 9:16.**
+2. **Template.** Cada tarjeta muestra el reel animado con tus formas y tus textos. Sus tiempos son proporcionales a la duración.
+
+   | Template | Fuente | Qué hace |
+   |---|---|---|
+   | **Revelado** | Foto | Las formas arman la imagen, se sostienen y hacen un fundido a la foto real. El cierre aparece al final. |
+   | **Loop hipnótico** | Foto o video | La foto se simplifica hasta las formas grandes y se vuelve a armar, con un zoom que respira; el video va y vuelve. El último cuadro es idéntico al primero, así la repetición automática de las apps no tiene corte. |
+   | **Video en formas** | Video | La porción en formas y, en el tramo final, un fundido al video original. |
+
+   *Automático* elige Revelado para fotos y Video en formas para videos.
+3. **Duración.** Atajos de 10, 15, 30 y 60 s, o libre (3 a 90 s). En los videos fija el largo de la porción (la mitad en el loop, que va y vuelve). Si elegís la porción a mano, pasa a ser libre.
+4. **Encuadre 9:16.**
    - *Llenar* recorta: zoom, posición, y también arrastrar la vista previa o usar la rueda del mouse.
    - *Ajustar* muestra la fuente completa sobre una copia desenfocada.
    - Las zonas rojas marcan lo que tapan TikTok, Reels y Shorts (barra superior, texto de la cuenta, botones). Conviene dejar lo importante fuera de ellas.
-3. **Formas.** Cantidad, tipo y resolución de cálculo.
+5. **Formas.** Cantidad, tipo y resolución de cálculo.
    - En las fotos el recorte se aplica antes de calcular, así las formas cubren justo el cuadro.
    - En los videos se calculan los keyframes solo para la porción y el recorte elegidos, con flujo óptico.
+6. **Textos.** Título (el gancho del principio), cierre y marca, todos opcionales. Aparecen con un fundido y un leve movimiento, con sombra, y quedan fuera de las zonas que tapan las apps; si no entran, se achican.
 
-La vista previa reproduce las formas o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo.
+La vista previa reproduce el reel o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo. Los templates viven en `web/templates.js`: cada uno es una función del tiempo, así la exportación va a dibujar exactamente los mismos cuadros que la vista previa.
 
-Próximas entregas: templates (Revelado, Loop hipnótico, Video en formas), textos, audio y exportación a 1080×1920 con biblioteca de reels.
+Próxima entrega: audio y exportación a 1080×1920 con biblioteca de reels.
 
 ## Video
 

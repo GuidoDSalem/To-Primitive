@@ -1,7 +1,7 @@
 "use strict";
 
-// Reel editor: a photo or a portion of a video, framed vertically (9:16)
-// and turned into shapes. Templates, texts and audio build on top of this.
+// Reel editor: a photo or a portion of a video, framed vertically (9:16),
+// turned into shapes and played through a template with texts on top.
 
 const $ = (id) => document.getElementById(id);
 const ASPECT = 9 / 16;
@@ -15,12 +15,6 @@ async function api(path, opts) {
   return res.headers.get("Content-Type")?.includes("json") ? res.json() : res;
 }
 
-// Until templates exist, photos animate with a plain build.
-const DEFAULT_BUILD = {
-  direction: "build", order: "original", curve: "outCubic", effect: "fade", effectTime: 0.5,
-  duration: 5, holdStart: 0.3, holdEnd: 1.5,
-};
-
 const reel = {
   kind: null,       // "image" | "video"
   name: "",
@@ -29,7 +23,9 @@ const reel = {
   video: null,      // { id, info } of the uploaded video
   portion: { start: 0, end: 0 },
   framing: { mode: "fill", zoom: 1, px: 0.5, py: 0.5 },
-  gen: null,        // generated shapes: { key, plan } (photo) or { key, anim } (video)
+  template: "auto",
+  duration: { preset: "15", free: 20 },
+  gen: null,        // generated shapes: { key, image } (photo) or { key, anim } (video)
   generating: null, // { cancel() } while generating
 };
 const srcVideo = $("srcVideo");
@@ -62,18 +58,21 @@ function contentAspect() {
   return w && h ? w / h : ASPECT;
 }
 
-const layer = document.createElement("canvas");
-const tiny = document.createElement("canvas");
+// Scratch canvases for drawFramed, one set per target so that drawing the
+// preview and the template cards doesn't keep resizing the same ones.
+const buffers = () => ({ layer: document.createElement("canvas"), tiny: document.createElement("canvas") });
+const previewBufs = buffers();
 
 // Draw a frame of the reel: paint(ctx, w, h) draws the content filling w x h.
 // In "fit" mode the content is letterboxed over a blurred, darkened copy of
 // itself (scaling a tiny copy up blurs it for free).
-function drawFramed(ctx, W, H, paint) {
+function drawFramed(ctx, W, H, paint, bufs = previewBufs) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (reel.framing.mode === "fill") {
     paint(ctx, W, H);
     return;
   }
+  const { layer, tiny } = bufs;
   const aspect = contentAspect();
   let lw = W, lh = W / aspect;
   if (lh > H) { lh = H; lw = H * aspect; }
@@ -88,6 +87,7 @@ function drawFramed(ctx, W, H, paint) {
   tiny.height = Math.max(1, Math.round(24 / aspect));
   tiny.getContext("2d").drawImage(layer, 0, 0, tiny.width, tiny.height);
   const s = Math.max(W / lw, H / lh) * 1.1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(tiny, (W - lw * s) / 2, (H - lh * s) / 2, lw * s, lh * s);
@@ -96,21 +96,57 @@ function drawFramed(ctx, W, H, paint) {
   ctx.drawImage(layer, Math.round((W - lw) / 2), Math.round((H - lh) / 2));
 }
 
-// The original (photo, or the video's current frame) with the current framing.
-function paintOriginal(ctx, w, h) {
+// The original (photo, or the video's current frame) with the current
+// framing. over: draw only the picture, on top of what's there (fades).
+function paintOriginal(ctx, w, h, over = false) {
   const el = reel.kind === "image" ? reel.img : srcVideo;
   const [sw, sh] = sourceSize();
   const c = crop() ?? { x: 0, y: 0, w: 1, h: 1 };
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, w, h);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (!over) {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, w, h);
+  }
   if (sw && (reel.kind === "image" || srcVideo.readyState >= 2)) {
     ctx.drawImage(el, c.x * sw, c.y * sh, c.w * sw, c.h * sh, 0, 0, w, h);
   }
 }
 
-function paintShapes(ctx, w, h, t) {
-  if (reel.gen.plan) reel.gen.plan.render(ctx, t, w, h);
-  else Motion.render(ctx, reel.gen.anim, t, "smooth", w, h);
+// ---------- template, duration and texts ----------
+
+const templateId = () => (reel.template === "auto" ? Templates.auto(reel.kind) : reel.template);
+const texts = () => ({ title: $("tTitle").value, closing: $("tClosing").value, brand: $("tBrand").value });
+
+// Requested length of the reel, in seconds.
+function reelSeconds() {
+  const d = reel.duration;
+  return d.preset === "free" ? clamp(+d.free || 15, 3, 90) : +d.preset;
+}
+
+// For videos the duration is set through the portion: the loop plays it
+// forward and back, so it takes half.
+const portionFactor = () => (templateId() === "loop" ? 2 : 1);
+
+// The template applied to the generated shapes, or null when there's
+// nothing (current) to show. Cached per shapes, template and duration.
+function composition(id = templateId()) {
+  if (!reel.gen || stale() || !Templates.LIST[id].kinds.includes(reel.kind)) return null;
+  const hasClosing = !!$("tClosing").value.trim();
+  const key = [id, reel.kind === "image" ? reelSeconds() : 0, hasClosing].join("|");
+  const cache = (reel.gen.comps ??= new Map());
+  if (!cache.has(key)) {
+    cache.set(key, Templates.make(id, {
+      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, duration: reelSeconds(), hasClosing,
+      paintOriginal: (ctx, w, h) => paintOriginal(ctx, w, h, true),
+    }));
+  }
+  return cache.get(key);
+}
+
+// A full frame of the reel at time t: framed content plus texts.
+function renderReel(ctx, comp, t, W, H, bufs) {
+  drawFramed(ctx, W, H, (c, w, h) => comp.paint(c, t, w, h), bufs);
+  Templates.draw(ctx, W, H, texts(), comp.textAlpha(t));
 }
 
 // ---------- generation ----------
@@ -248,14 +284,10 @@ $("generate").addEventListener("click", async () => {
   setProgress(0, "Preparando…");
   const started = performance.now();
   try {
-    if (reel.kind === "image") {
-      const image = await generateImage(p);
-      reel.gen = { key, plan: Build.plan(image, DEFAULT_BUILD), image };
-    } else {
-      reel.gen = { key, anim: await generateVideo(p) };
-    }
+    if (reel.kind === "image") reel.gen = { key, image: await generateImage(p) };
+    else reel.gen = { key, anim: await generateVideo(p) };
     setProgress(null, `Listo en ${((performance.now() - started) / 1000).toFixed(1)} s.`);
-    setView("shapes");
+    setView("reel");
     player.seek(0);
     player.play();
   } catch (e) {
@@ -269,7 +301,7 @@ $("generate").addEventListener("click", async () => {
 
 // ---------- preview player ----------
 
-let view = "original"; // what the preview shows: "shapes" or "original"
+let view = "original"; // what the preview shows: "reel" or "original"
 
 function setView(v) {
   view = v;
@@ -281,12 +313,13 @@ $("viewMode").addEventListener("click", (e) => {
   if (b && !b.disabled) setView(b.dataset.value);
 });
 
-const showingShapes = () => view === "shapes" && reel.gen && !stale();
+const shownReel = () => (view === "reel" ? composition() : null);
+const portionLength = () => Math.max(0.1, reel.portion.end - reel.portion.start);
 
 function reelDuration() {
-  if (reel.kind === "video") return Math.max(0.1, reel.portion.end - reel.portion.start);
-  if (reel.gen?.plan) return reel.gen.plan.duration;
-  return 5;
+  const comp = shownReel();
+  if (comp) return comp.duration;
+  return reel.kind === "video" ? portionLength() : reelSeconds();
 }
 
 const player = (() => {
@@ -294,13 +327,19 @@ const player = (() => {
   const ctx = canvas.getContext("2d", { alpha: false });
   let t = 0, playing = false, last = 0, raf = 0;
 
-  // Keep the hidden <video> on the frame for time t (original view).
+  // Keep the hidden <video> on the frame the preview needs at time t.
   function syncVideo(play) {
     if (reel.kind !== "video") return;
-    const want = reel.portion.start + t;
+    const comp = shownReel();
+    const vt = comp ? comp.videoTime(t) : t;
+    if (vt === null) {
+      srcVideo.pause();
+      return;
+    }
+    const want = reel.portion.start + Math.min(vt, portionLength() - 0.04);
     if (play) {
       if (Math.abs(srcVideo.currentTime - want) > 0.25) srcVideo.currentTime = want;
-      srcVideo.play().catch(() => {});
+      if (srcVideo.paused) srcVideo.play().catch(() => {});
     } else {
       srcVideo.pause();
       if (Math.abs(srcVideo.currentTime - want) > 0.01) srcVideo.currentTime = want;
@@ -320,11 +359,13 @@ const player = (() => {
     }
     const dur = reelDuration();
     t = clamp(t, 0, dur);
+    const comp = shownReel();
     if (!reel.kind) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, w, h);
-    } else if (showingShapes()) {
-      drawFramed(ctx, w, h, (c, cw, ch) => paintShapes(c, cw, ch, t));
+    } else if (comp) {
+      renderReel(ctx, comp, t, w, h);
     } else {
       drawFramed(ctx, w, h, paintOriginal);
     }
@@ -336,17 +377,10 @@ const player = (() => {
   function tick(now) {
     raf = 0;
     if (!playing) return;
-    const dur = reelDuration();
-    if (reel.kind === "video" && !showingShapes() && !srcVideo.paused && srcVideo.readyState >= 2) {
-      t = srcVideo.currentTime - reel.portion.start;
-    } else {
-      t += (now - last) / 1000;
-    }
+    t += (now - last) / 1000;
     last = now;
-    if (t >= dur || t < 0) {
-      t = 0;
-      syncVideo(true);
-    }
+    if (t >= reelDuration()) t = 0;
+    syncVideo(true);
     draw();
     raf = requestAnimationFrame(tick);
   }
@@ -384,14 +418,12 @@ const player = (() => {
       playing ? pause() : play();
     }
   });
-  return { draw, play, pause, seek, get playing() { return playing; } };
+  return { draw, play, pause, seek, get playing() { return playing; }, get time() { return t; } };
 })();
 
-// Areas the apps cover with their own buttons and captions (TikTok, Reels,
-// Shorts): keep titles and logos out of them.
-const SAFE = { top: 0.13, bottom: 0.2, right: 0.12, rightFrom: 0.45 };
-
+// Areas the apps cover with their own buttons and captions.
 function drawOverlay() {
+  const SAFE = Templates.SAFE;
   const c = $("overlay"), g = c.getContext("2d");
   const w = c.width, h = c.height;
   g.clearRect(0, 0, w, h);
@@ -424,6 +456,107 @@ function drawOverlay() {
 }
 $("safeZones").addEventListener("input", drawOverlay);
 
+// ---------- template cards ----------
+
+const cards = (() => {
+  const list = [];
+  for (const id of ["auto", ...Object.keys(Templates.LIST)]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tpl";
+    b.dataset.value = id;
+    const canvas = document.createElement("canvas");
+    canvas.width = 108;
+    canvas.height = 192;
+    const label = document.createElement("span");
+    b.append(canvas, label);
+    $("templates").append(b);
+    b.addEventListener("click", () => {
+      reel.template = id;
+      if (reel.kind === "video") applyDuration();
+      refreshUI();
+      player.seek(0);
+    });
+    list.push({ id, b, canvas, label, ctx: canvas.getContext("2d", { alpha: false }), bufs: buffers() });
+  }
+  const resolved = (c) => (c.id === "auto" ? Templates.auto(reel.kind) : c.id);
+
+  function drawCard(c, now) {
+    const comp = composition(resolved(c));
+    const { ctx, canvas } = c;
+    if (comp) {
+      renderReel(ctx, comp, (now / 1000) % comp.duration, canvas.width, canvas.height, c.bufs);
+    } else if (reel.kind) {
+      drawFramed(ctx, canvas.width, canvas.height, paintOriginal, c.bufs);
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  // Animate the cards (at a low frame rate) while there's something to show.
+  let raf = 0, last = 0;
+  function frame(now) {
+    raf = 0;
+    if (document.hidden || !reel.gen) return;
+    if (now - last >= 1000 / 20) {
+      last = now;
+      for (const c of list) if (!c.b.hidden) drawCard(c, now);
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  document.addEventListener("visibilitychange", () => update());
+
+  function update() {
+    for (const c of list) {
+      c.b.hidden = !!reel.kind && c.id !== "auto" && !Templates.LIST[c.id].kinds.includes(reel.kind);
+      c.b.classList.toggle("on", c.id === reel.template);
+      c.label.textContent = c.id === "auto"
+        ? "Automático" + (reel.kind ? ` (${Templates.LIST[Templates.auto(reel.kind)].name})` : "")
+        : Templates.LIST[c.id].name;
+      if (!c.b.hidden) drawCard(c, performance.now());
+    }
+    if (reel.gen && !raf) raf = requestAnimationFrame(frame);
+  }
+  return { update };
+})();
+
+// ---------- duration ----------
+
+// Videos: the duration chooses the portion's length (keeping its start).
+function applyDuration() {
+  if (reel.kind !== "video") return;
+  const dur = reel.video.info.duration;
+  const len = clamp(reelSeconds() / portionFactor(), 0.5, Math.min(MAX_PORTION, dur));
+  const start = clamp(reel.portion.start, 0, dur - len);
+  setPortion(start, start + len);
+}
+
+$("durPreset").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  reel.duration.preset = b.dataset.value;
+  applyDuration();
+  refreshUI();
+  player.seek(0);
+});
+$("durFree").addEventListener("input", () => {
+  reel.duration.free = +$("durFree").value;
+  applyDuration();
+  refreshUI();
+  player.draw();
+});
+
+// ---------- texts ----------
+
+for (const id of ["tTitle", "tClosing", "tBrand"]) {
+  $(id).addEventListener("input", () => {
+    refreshUI();
+    if (!player.playing) player.draw();
+  });
+}
+
 // ---------- loading a source ----------
 
 async function loadSource(file) {
@@ -452,11 +585,9 @@ async function loadSource(file) {
       });
       reel.video = d;
       reel.kind = "video";
-      const dur = d.info.duration;
-      reel.portion = { start: 0, end: Math.min(dur, 10) };
-      for (const id of ["pStart", "pEnd"]) $(id).max = dur.toFixed(2);
-      $("pStart").value = 0;
-      $("pEnd").value = reel.portion.end;
+      for (const id of ["pStart", "pEnd"]) $(id).max = d.info.duration.toFixed(2);
+      reel.portion = { start: 0, end: 0 };
+      applyDuration();
     } else {
       const img = new Image();
       img.src = reel.url;
@@ -492,6 +623,12 @@ $("dropHint").addEventListener("click", () => $("file").click());
 
 // ---------- portion of the video ----------
 
+function setPortion(s, e) {
+  reel.portion = { start: Math.round(s * 100) / 100, end: Math.round(e * 100) / 100 };
+  $("pStart").value = reel.portion.start;
+  $("pEnd").value = reel.portion.end;
+}
+
 function onPortion(changed) {
   const dur = reel.video.info.duration;
   let s = +$("pStart").value, e = +$("pEnd").value;
@@ -503,10 +640,12 @@ function onPortion(changed) {
     e = clamp(e, 0.5, dur);
     s = clamp(s, Math.max(0, e - MAX_PORTION), e - 0.5);
   }
-  $("pStart").value = s;
-  $("pEnd").value = e;
-  reel.portion = { start: s, end: e };
+  setPortion(s, e);
+  // Choosing the portion by hand sets a free duration.
+  reel.duration = { preset: "free", free: Math.round((e - s) * portionFactor() * 10) / 10 };
+  $("durFree").value = reel.duration.free;
   // Show the frame being chosen.
+  setView("original");
   player.pause();
   player.seek(changed === "start" ? 0 : e - s);
   refreshUI();
@@ -600,25 +739,40 @@ function refreshUI() {
   $("shapesOut").textContent = $("shapes").value;
   $("inputSizeOut").textContent = $("inputSize").value + " px";
   drawOverlay();
+
+  // Template and duration.
+  const tpl = Templates.LIST[templateId()];
+  $("tplInfo").textContent = has ? tpl.desc : "Subí una fuente para ver los templates.";
+  for (const b of $("durPreset").children) b.classList.toggle("on", b.dataset.value === reel.duration.preset);
+  $("durFreeBox").hidden = reel.duration.preset !== "free";
   if (reel.kind === "video") {
     const { start, end } = reel.portion;
     const dur = reel.video.info.duration;
-    $("portionOut").textContent = `${fmtTime(start)} – ${fmtTime(end)} (${(end - start).toFixed(1)} s)`;
+    const len = end - start, total = len * portionFactor();
+    $("portionOut").textContent = `${fmtTime(start)} – ${fmtTime(end)} (${len.toFixed(1)} s)`;
     $("portionSel").style.left = (100 * start) / dur + "%";
-    $("portionSel").style.width = (100 * (end - start)) / dur + "%";
+    $("portionSel").style.width = (100 * len) / dur + "%";
+    $("durInfo").textContent = `El reel dura ${total.toFixed(1)} s` +
+      (portionFactor() > 1 ? ` (${len.toFixed(1)} s del video, de ida y de vuelta)` : "") +
+      (total < reelSeconds() - 0.05 ? ". El video no alcanza para más." : ".");
+  } else {
+    $("durInfo").textContent = has ? `El reel dura ${reelSeconds()} s; los tiempos del template se ajustan solos.` : "";
   }
-  const shapesBtn = $("viewMode").querySelector('[data-value="shapes"]');
-  shapesBtn.disabled = !reel.gen || stale();
+
+  const comp = composition();
+  $("viewMode").querySelector('[data-value="reel"]').disabled = !comp;
+  if (view === "reel" && !comp) setView("original");
   if (!reel.generating) {
     if (!has) $("genStatus").textContent = "";
-    else if (stale()) $("genStatus").innerHTML = '<span class="stale">Cambiaste el encuadre o los ajustes: generá de nuevo para ver las formas.</span>';
+    else if (stale()) $("genStatus").innerHTML = '<span class="stale">Cambiaste el encuadre, la porción o los ajustes: generá de nuevo para ver el reel.</span>';
     else if (!reel.gen) $("genStatus").textContent = "Elegí el encuadre y generá las formas.";
   }
   if (has) {
     const c = crop();
-    $("stats").textContent = `${reel.kind === "image" ? "Foto" : "Video"} · ` +
+    $("stats").textContent = `${reel.kind === "image" ? "Foto" : "Video"} · ${tpl.name} · ` +
       (c ? `recorte ${Math.round(c.w * 100)}% × ${Math.round(c.h * 100)}% del original` : "completa, con fondo desenfocado");
   }
+  cards.update();
 }
 
 refreshUI();
