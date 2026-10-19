@@ -167,7 +167,8 @@ const Motion = (() => {
     }, opts);
   }
 
-  // Encode any source { width, height, duration, render(ctx, t, w, h) }.
+  // Encode any source { width, height, duration, render(ctx, t, w, h) }; an
+  // optional async prepare(t) runs before each frame (e.g. to seek a video).
   async function encodeMP4(src, { fps, longSide, onProgress, signal }) {
     const [w, h] = outputSize(src, longSide);
     const { kind, config } = await pickEncoder(w, h, fps);
@@ -192,6 +193,7 @@ const Motion = (() => {
       for (let f = 0; f < total; f++) {
         if (signal?.aborted) throw new DOMException("cancelado", "AbortError");
         if (failure) throw failure;
+        if (src.prepare) await src.prepare(f / fps);
         src.render(ctx, f / fps, w, h);
         const frame = new VideoFrame(canvas, { timestamp: Math.round((f * 1e6) / fps), duration: Math.round(1e6 / fps) });
         encoder.encode(frame, { keyFrame: f % Math.round(fps * 2) === 0 });

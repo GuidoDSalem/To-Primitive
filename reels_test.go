@@ -293,3 +293,42 @@ func TestReelEndpoints(t *testing.T) {
 		t.Errorf("list after delete: %+v", list)
 	}
 }
+
+// Browsers without an H.264 encoder hand in VP9: the reel comes out H.264
+// anyway, and save=1 stores it in the library in the same request.
+func TestMuxTranscodesAndSaves(t *testing.T) {
+	needFFmpeg(t)
+	dir := t.TempDir()
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	os.MkdirAll(srv.dataDir, 0o755)
+	os.MkdirAll(srv.lib.dir, 0o755)
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	vp9 := makeMedia(t, dir, "vp9.mp4", "-f", "lavfi", "-i", "testsrc=size=180x320:rate=30:duration=2",
+		"-c:v", "libvpx-vp9", "-b:v", "200k", "-deadline", "realtime")
+	audio := sine(t, dir, "a.wav", 4)
+
+	body, ct := multipartBody(t, map[string]string{"video": vp9, "audio": audio},
+		map[string]string{"save": "1", "meta": `{"template":"loop"}`})
+	res, err := http.Post(ts.URL+"/api/reels/mux", ct, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("mux+save: %d %s", res.StatusCode, b)
+	}
+	var e ReelEntry
+	json.NewDecoder(res.Body).Decode(&e)
+	if e.Width != 180 || e.Height != 320 || math.Abs(e.Duration-2) > 0.1 || !strings.Contains(string(e.Meta), "loop") {
+		t.Fatalf("entry %+v", e)
+	}
+	vpath, _, _ := srv.lib.paths(e.ID)
+	ctx := context.Background()
+	if c, _ := videoCodec(ctx, vpath); c != "h264" {
+		t.Errorf("stored codec %q, want h264", c)
+	}
+	if ok, _ := hasAudio(ctx, vpath); !ok {
+		t.Error("stored reel has no audio")
+	}
+}

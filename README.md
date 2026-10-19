@@ -138,7 +138,7 @@ En el navegador, con cámara simulada en Chrome:
 - 100 formas a 128 px: ~11 keyframes/s, con ~200 ms de retraso en pantalla.
 - 50 formas: ~16 keyframes/s, con ~140 ms de retraso.
 
-## Editor de reels (en construcción)
+## Editor de reels
 
 `/reels.html` (enlace "editor de reels" arriba del panel) arma un reel vertical a partir de una foto o un tramo de video.
 
@@ -161,10 +161,16 @@ En el navegador, con cámara simulada en Chrome:
    - En las fotos el recorte se aplica antes de calcular, así las formas cubren justo el cuadro.
    - En los videos se calculan los keyframes solo para la porción y el recorte elegidos, con flujo óptico.
 6. **Textos.** Título (el gancho del principio), cierre y marca, todos opcionales. Aparecen con un fundido y un leve movimiento, con sombra, y quedan fuera de las zonas que tapan las apps; si no entran, se achican.
+7. **Audio.** Sin sonido, el sonido del video (el tramo elegido) o un archivo propio, desde el segundo que elijas. Con volumen y fundido de salida. Se escucha al reproducir la vista previa.
+8. **Exportar.** El navegador dibuja cada cuadro a 1080×1920 y 30 fps y lo codifica en H.264 (WebCodecs); el servidor le agrega el audio en AAC (recortado a la duración del reel, rellenado con silencio si es más corto y con el fundido) y lo guarda en la biblioteca. El MP4 se descarga solo y está listo para subir a TikTok, Reels o Shorts. Si el navegador solo puede codificar VP9, el servidor lo convierte a H.264.
 
-La vista previa reproduce el reel o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo. Los templates viven en `web/templates.js`: cada uno es una función del tiempo, así la exportación va a dibujar exactamente los mismos cuadros que la vista previa.
+**Biblioteca.** Al pie del panel están los reels exportados, del más nuevo al más viejo, para verlos, descargarlos o borrarlos. Cada uno guarda un registro con lo que lo generó: template, duración, fuente, tramo, encuadre, formas, textos, audio y datos de la exportación. Sirve para comparar después qué combinación funciona mejor en las redes.
 
-Próxima entrega: audio y exportación a 1080×1920 con biblioteca de reels.
+Exportar un reel de 10 s de una foto con 100 formas tarda unos 9 s; uno de 2,5 s de video, unos 4 s (más el cálculo de las formas).
+
+La vista previa reproduce el reel o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo. Los templates viven en `web/templates.js`: cada uno es una función del tiempo, así la exportación dibuja exactamente los mismos cuadros que la vista previa.
+
+Próximas etapas: una cola de publicación con una regla configurable (por ejemplo, un reel por día a cierta hora) y la publicación automática.
 
 ## Video
 
@@ -285,7 +291,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/live/{id}/frame` | Un frame de la cámara (JPEG); header `X-Capture-Time` con el reloj del navegador |
 | `PUT /api/live/{id}/params` | Cambia los parámetros (`restart: true` empieza de nuevo) |
 | `DELETE /api/live/{id}` | Cierra la sesión (también se cierra sola a los 10 s sin nadie mirando) |
-| `POST /api/reels/mux` | Agrega el audio a un reel codificado en el navegador. Campos: `video`; opcionales `audio` (archivo propio) o `source` (id de un video subido, con `sourceStart`), más `audioStart`, `volume` y `fadeOut`. El audio se recorta a la duración del video, se rellena con silencio si es más corto y termina con un fundido |
+| `POST /api/reels/mux` | Agrega el audio a un reel codificado en el navegador. Campos: `video`; opcionales `audio` (archivo propio) o `source` (id de un video subido, con `sourceStart`), más `audioStart`, `volume` y `fadeOut`. El audio se recorta a la duración del video, se rellena con silencio si es más corto y termina con un fundido. Si el video no es H.264 se convierte. Con `save=1` (y `meta`) lo guarda en la biblioteca y responde con su entrada en vez del archivo |
 | `POST /api/reels` | Guarda un reel terminado en la biblioteca (campos `video` y `meta`, un JSON libre: template, duración, ajustes…) |
 | `GET /api/reels` | Lista la biblioteca, del más nuevo al más viejo |
 | `GET /api/reels/{id}/video` | El MP4 de un reel (`?download=1` para descargarlo) |

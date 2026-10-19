@@ -30,13 +30,23 @@ type audioSpec struct {
 var errNoAudio = errors.New("the audio source has no audio track")
 
 // muxReel turns the video-only MP4 encoded in the browser into the final
-// reel: H.264 copied as is, the audio (if any) cut to the video's length,
-// padded with silence if shorter, faded out, and AAC-encoded, with the index
-// at the front so it plays while downloading.
+// reel: H.264 copied as is (anything else, e.g. VP9 from browsers without an
+// H.264 encoder, is re-encoded to H.264, which every platform accepts), the
+// audio (if any) cut to the video's length, padded with silence if shorter,
+// faded out, and AAC-encoded, with the index at the front so it plays while
+// downloading.
 func muxReel(ctx context.Context, videoPath, outPath string, a audioSpec) error {
+	vcodec, err := videoCodec(ctx, videoPath)
+	if err != nil {
+		return err
+	}
+	cv := []string{"-c:v", "copy"}
+	if vcodec != "h264" {
+		cv = []string{"-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"}
+	}
 	if a.File == "" {
-		_, err := runFFmpeg(ctx, "ffmpeg", "-v", "error", "-y", "-i", videoPath,
-			"-map", "0:v", "-c", "copy", "-movflags", "+faststart", outPath)
+		args := append([]string{"-v", "error", "-y", "-i", videoPath, "-map", "0:v"}, cv...)
+		_, err := runFFmpeg(ctx, "ffmpeg", append(args, "-movflags", "+faststart", outPath)...)
 		return err
 	}
 	ok, err := hasAudio(ctx, a.File)
@@ -58,13 +68,25 @@ func muxReel(ctx context.Context, videoPath, outPath string, a audioSpec) error 
 	if fade > 0 {
 		af += fmt.Sprintf(",afade=t=out:st=%.3f:d=%.3f", dur.Duration-fade, fade)
 	}
-	_, err = runFFmpeg(ctx, "ffmpeg", "-v", "error", "-y",
+	args := []string{"-v", "error", "-y",
 		"-i", videoPath,
 		"-ss", strconv.FormatFloat(max(0, a.Start), 'f', 3, 64), "-i", a.File,
-		"-map", "0:v", "-map", "1:a:0", "-c:v", "copy",
-		"-af", af, "-t", strconv.FormatFloat(dur.Duration, 'f', 3, 64),
+		"-map", "0:v", "-map", "1:a:0"}
+	args = append(args, cv...)
+	args = append(args, "-af", af, "-t", strconv.FormatFloat(dur.Duration, 'f', 3, 64),
 		"-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", outPath)
+	_, err = runFFmpeg(ctx, "ffmpeg", args...)
 	return err
+}
+
+// videoCodec is the codec name of a file's first video stream ("" if none).
+func videoCodec(ctx context.Context, path string) (string, error) {
+	out, err := runFFmpeg(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=codec_name", "-of", "csv=p=0", path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func hasAudio(ctx context.Context, path string) (bool, error) {
@@ -244,7 +266,8 @@ func formFloat(r *http.Request, field string, def float64) float64 {
 // reelMux receives the browser-encoded video and the sound settings and
 // returns the final reel. Form fields: video (file), audio (file, optional),
 // source (id of an uploaded video whose sound to use, optional),
-// sourceStart, audioStart, volume, fadeOut.
+// sourceStart, audioStart, volume, fadeOut; with save=1 the reel goes to the
+// library (with meta) and the answer is its entry instead of the file.
 func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxReelUpload)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -289,6 +312,22 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusBadRequest
 		}
 		http.Error(w, err.Error(), status)
+		return
+	}
+	// save=1: keep it in the library (with meta) and answer with its entry.
+	if r.FormValue("save") != "" {
+		f, err := os.Open(out)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		e, err := srv.lib.Save(r.Context(), f, json.RawMessage(r.FormValue("meta")))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		writeJSON(w, e)
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp4")

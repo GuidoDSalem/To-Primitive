@@ -54,6 +54,16 @@
 .tpl.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .tpl.on span { color: var(--text); }
 
+/* Library: one row per reel. */
+.library { display: flex; flex-direction: column; gap: 8px; }
+.reel-item { display: flex; gap: 10px; align-items: center; }
+.reel-item video { width: 54px; aspect-ratio: 9 / 16; border-radius: 4px; background: #000; object-fit: cover; flex: none; cursor: pointer; }
+.reel-item .info { flex: 1; min-width: 0; font-size: 12px; }
+.reel-item .info strong { display: block; font-size: 13px; }
+.reel-item .info span { color: var(--muted); }
+.reel-item .actions { display: flex; flex-direction: column; gap: 4px; }
+.reel-item .actions a, .reel-item .actions button { font-size: 11px; padding: 3px 8px; margin: 0; text-align: center; }
+
 textarea, input[type=text] {
   width: 100%; padding: 6px 8px; border-radius: 6px; resize: vertical;
   border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;

@@ -53,10 +53,11 @@ const Templates = (() => {
 
   // src: { kind, image (photo shapes) | anim (video keyframes), duration (photo),
   //        hasClosing, paintOriginal(ctx, w, h) }
-  // Returns { id, duration, paint(ctx, t, w, h), videoTime(t), textAlpha(t) }:
-  // paint fills w x h with the content (no texts), videoTime says which
-  // second of the portion the original video must show (null = not needed),
-  // textAlpha gives the visibility of the title and the closing.
+  // Returns { id, duration, paint(ctx, t, w, h), videoTime(t), originalFrom,
+  // textAlpha(t) }: paint fills w x h with the content (no texts), videoTime
+  // says which second of the portion the original video shows (null = none),
+  // originalFrom is when the original starts being visible, and textAlpha
+  // gives the visibility of the title and the closing.
   function make(id, src) {
     const scratch = new Map();
     if (id === "reveal") {
@@ -67,7 +68,7 @@ const Templates = (() => {
         effectTime: Math.min(0.6, B * 0.2), duration: B, holdStart: 0.2, holdEnd: D,
       });
       return {
-        id, duration: D, videoTime: () => null,
+        id, duration: D, videoTime: () => null, originalFrom: F,
         paint(ctx, t, w, h) {
           plan.render(ctx, t, w, h);
           overlay(ctx, smooth((t - F) / X), () => src.paintOriginal(ctx, w, h));
@@ -82,7 +83,7 @@ const Templates = (() => {
       const D = src.anim.duration;
       const X = clamp(0.2 * D, 0.5, 2);
       return {
-        id, duration: D, videoTime: (t) => t,
+        id, duration: D, videoTime: (t) => t, originalFrom: D - X,
         paint(ctx, t, w, h) {
           Motion.render(ctx, src.anim, t, "smooth", w, h);
           overlay(ctx, smooth((t - (D - X)) / X), () => src.paintOriginal(ctx, w, h));
@@ -112,7 +113,7 @@ const Templates = (() => {
         frame = (ctx, t, w, h) => Motion.render(ctx, src.anim, t <= L ? t : 2 * L - t, "smooth", w, h);
       }
       return {
-        id, duration: D, videoTime: () => null,
+        id, duration: D, videoTime: () => null, originalFrom: Infinity,
         paint(ctx, t, w, h) {
           const c = 0.5 + 0.5 * Math.cos((2 * Math.PI * t) / D); // 1 at both ends
           zoomed(ctx, w, h, 1 + 0.08 * (1 - c), scratch, (g, gw, gh) => frame(g, t, gw, gh, c));

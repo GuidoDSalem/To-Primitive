@@ -131,7 +131,51 @@
         </div>
         <p class="hint">Todos opcionales. Se ubican fuera de las zonas que tapan las apps.</p>
       </section>
+
+      <section>
+        <h2>7 · Audio</h2>
+        <div id="audioMode" class="chips">
+          <button data-value="none" class="on">Sin sonido</button>
+          <button data-value="source">Sonido del video</button>
+          <button data-value="file">Archivo propio</button>
+        </div>
+        <div id="audioFileBox" style="margin-top:10px" hidden>
+          <label class="button wide">
+            <input id="audioFile" type="file" accept="audio/*,video/*" hidden>
+            Elegir audio…
+          </label>
+          <p id="audioName" class="hint">Ningún archivo elegido.</p>
+          <div class="field" style="margin-top:10px">
+            <label for="audioStart">Empieza en (segundos del audio)</label>
+            <input id="audioStart" type="number" min="0" step="0.5" value="0">
+          </div>
+        </div>
+        <div id="audioLevels" style="margin-top:10px" hidden>
+          <div class="field">
+            <label for="volume">Volumen <output id="volumeOut"></output></label>
+            <input id="volume" type="range" min="0" max="2" step="0.05" value="1">
+          </div>
+          <div class="field">
+            <label for="fadeOut">Fundido de salida <output id="fadeOutOut"></output></label>
+            <input id="fadeOut" type="range" min="0" max="5" step="0.1" value="1.5">
+          </div>
+          <p class="hint">Se escucha al reproducir el reel. Se corta a la duración del reel; si es más corto, sigue en silencio.</p>
+        </div>
+        <audio id="audioPreview" preload="auto" hidden></audio>
+      </section>
+
+      <section>
+        <h2>8 · Exportar</h2>
+        <button id="export" class="wide primary">Exportar reel (MP4 1080×1920)</button>
+        <progress id="expProgress" max="1" value="0" hidden></progress>
+        <p id="expStatus" class="hint">Se descarga y queda en la biblioteca, con el registro de template, duración y ajustes.</p>
+      </section>
     </fieldset>
+
+    <section>
+      <h2>Biblioteca</h2>
+      <div id="library" class="library"><p class="hint">Cargando…</p></div>
+    </section>
 
     <footer id="stats">Sin fuente</footer>
   </aside>
@@ -156,6 +200,7 @@
     <video id="srcVideo" muted playsinline preload="auto" hidden></video>
   </main>
 
+  <script src="mp4.js"></script>
   <script src="motion.js"></script>
   <script src="build.js"></script>
   <script src="templates.js"></script>

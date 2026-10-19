@@ -25,6 +25,7 @@ const reel = {
   framing: { mode: "fill", zoom: 1, px: 0.5, py: 0.5 },
   template: "auto",
   duration: { preset: "15", free: 20 },
+  audio: { mode: "none", file: null, url: null }, // mode: "none" | "source" | "file"
   gen: null,        // generated shapes: { key, image } (photo) or { key, anim } (video)
   generating: null, // { cancel() } while generating
 };
@@ -346,6 +347,27 @@ const player = (() => {
     }
   }
 
+  // The reel's sound while it plays (approximate: the export mixes it on
+  // the server, with the exact fade).
+  const audio = $("audioPreview");
+  function syncAudio(play) {
+    const a = audioSource();
+    if (!play || !a || !shownReel()) {
+      audio.pause();
+      return;
+    }
+    if (audio.dataset.src !== a.url) {
+      audio.src = a.url;
+      audio.dataset.src = a.url;
+    }
+    const want = a.start + t;
+    if (Math.abs(audio.currentTime - want) > 0.25) audio.currentTime = want;
+    const dur = reelDuration(), fade = +$("fadeOut").value;
+    const fadeGain = fade > 0 ? clamp((dur - t) / fade, 0, 1) : 1;
+    audio.volume = clamp(+$("volume").value, 0, 1) * fadeGain;
+    if (audio.paused) audio.play().catch(() => {});
+  }
+
   function draw() {
     const box = $("phone");
     const dpr = window.devicePixelRatio || 1;
@@ -381,6 +403,7 @@ const player = (() => {
     last = now;
     if (t >= reelDuration()) t = 0;
     syncVideo(true);
+    syncAudio(true);
     draw();
     raf = requestAnimationFrame(tick);
   }
@@ -391,6 +414,7 @@ const player = (() => {
     $("play").textContent = "❚❚";
     last = performance.now();
     syncVideo(true);
+    syncAudio(true);
     if (!raf) raf = requestAnimationFrame(tick);
   }
 
@@ -398,12 +422,14 @@ const player = (() => {
     playing = false;
     $("play").textContent = "▶";
     syncVideo(false);
+    syncAudio(false);
     draw();
   }
 
   function seek(x) {
     t = clamp(x, 0, reelDuration());
     syncVideo(playing);
+    syncAudio(playing);
     draw();
   }
 
@@ -599,6 +625,8 @@ async function loadSource(file) {
     $("stats").textContent = "Error: " + e.message;
     return;
   }
+  // Default sound: the video's own, if it has one.
+  if (reel.audio.mode !== "file") reel.audio.mode = reel.video?.info.hasAudio ? "source" : "none";
   const [w, h] = sourceSize();
   $("sourceInfo").textContent = `${file.name} · ${w}×${h}` + (reel.video ? ` · ${fmtTime(reel.video.info.duration)}` + (reel.video.info.hasAudio ? " · con sonido" : "") : "");
   setView("original");
@@ -759,7 +787,24 @@ function refreshUI() {
     $("durInfo").textContent = has ? `El reel dura ${reelSeconds()} s; los tiempos del template se ajustan solos.` : "";
   }
 
+  // Audio and export.
+  const canSource = !!reel.video?.info.hasAudio;
+  if (reel.audio.mode === "source" && !canSource) reel.audio.mode = "none";
+  for (const b of $("audioMode").children) {
+    b.classList.toggle("on", b.dataset.value === reel.audio.mode);
+    if (b.dataset.value === "source") b.disabled = !canSource;
+  }
+  $("audioFileBox").hidden = reel.audio.mode !== "file";
+  $("audioLevels").hidden = reel.audio.mode === "none";
+  $("volumeOut").textContent = Math.round(+$("volume").value * 100) + " %";
+  $("fadeOutOut").textContent = (+$("fadeOut").value).toFixed(1) + " s";
+
   const comp = composition();
+  if (!exporting) {
+    $("export").disabled = !comp;
+    if (has && !comp) $("expStatus").textContent = "Generá las formas para poder exportar.";
+    else if (has && !$("expStatus").dataset.done) $("expStatus").textContent = `Reel de ${comp.duration.toFixed(1)} s · ${Templates.LIST[comp.id].name} · 1080×1920, 30 fps.`;
+  }
   $("viewMode").querySelector('[data-value="reel"]').disabled = !comp;
   if (view === "reel" && !comp) setView("original");
   if (!reel.generating) {
@@ -775,5 +820,186 @@ function refreshUI() {
   cards.update();
 }
 
+
+// ---------- audio ----------
+
+// Where the sound comes from: { url (for the preview), start }; null if none.
+function audioSource() {
+  const a = reel.audio;
+  if (a.mode === "file" && a.url) return { url: a.url, start: Math.max(0, +$("audioStart").value || 0) };
+  if (a.mode === "source" && reel.video?.info.hasAudio) return { url: reel.url, start: reel.portion.start };
+  return null;
+}
+
+$("audioMode").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled) return;
+  reel.audio.mode = b.dataset.value;
+  refreshUI();
+  player.seek(player.time);
+});
+$("audioFile").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
+  Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f) });
+  $("audioName").textContent = f.name;
+  e.target.value = "";
+  refreshUI();
+});
+for (const id of ["volume", "fadeOut", "audioStart"]) $(id).addEventListener("input", refreshUI);
+
+// ---------- export ----------
+
+let exporting = null; // AbortController while exporting
+
+// Settings of the reel, stored with it to compare later what works best.
+function reelMeta(comp, res, seconds) {
+  const a = reel.audio;
+  return {
+    v: 1,
+    template: comp.id, templateChoice: reel.template,
+    duration: Math.round(comp.duration * 100) / 100, durationChoice: { ...reel.duration },
+    source: { kind: reel.kind, name: reel.name, size: sourceSize(), portion: reel.kind === "video" ? { ...reel.portion } : null },
+    framing: { ...reel.framing }, crop: crop(),
+    shapes: params(),
+    texts: texts(),
+    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+    export: { width: res.width, height: res.height, fps: 30, codec: res.codec, seconds: Math.round(seconds * 10) / 10 },
+  };
+}
+
+// Before drawing frame t, have the hidden <video> on the right frame if the
+// original is visible then.
+async function seekSourceFor(comp, t) {
+  if (reel.kind !== "video" || t < comp.originalFrom) return;
+  const vt = comp.videoTime(t);
+  if (vt === null) return;
+  const want = reel.portion.start + Math.min(vt, portionLength() - 0.04);
+  if (Math.abs(srcVideo.currentTime - want) < 0.001 && srcVideo.readyState >= 2) return;
+  await new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); srcVideo.removeEventListener("seeked", done); resolve(); };
+    const timer = setTimeout(done, 3000);
+    srcVideo.addEventListener("seeked", done);
+    srcVideo.currentTime = want;
+  });
+}
+
+function setExport(fraction, text) {
+  $("expProgress").hidden = fraction === null;
+  if (fraction !== null) $("expProgress").value = fraction;
+  $("expStatus").textContent = text;
+}
+
+$("export").addEventListener("click", async () => {
+  if (exporting) {
+    exporting.abort();
+    return;
+  }
+  const comp = composition();
+  if (!comp) return;
+  player.pause();
+  srcVideo.pause();
+  exporting = new AbortController();
+  $("export").textContent = "Cancelar";
+  $("export").disabled = false;
+  delete $("expStatus").dataset.done;
+  const started = performance.now();
+  try {
+    const bufs = buffers();
+    const res = await Motion.encodeMP4({
+      width: 1080, height: 1920, duration: comp.duration,
+      prepare: (t) => seekSourceFor(comp, t),
+      render: (ctx, t, w, h) => renderReel(ctx, comp, t, w, h, bufs),
+    }, {
+      fps: 30, longSide: 1920, signal: exporting.signal,
+      onProgress: (f) => setExport(f * 0.9, `Codificando: ${Math.round(f * 100)} %`),
+    });
+    const seconds = (performance.now() - started) / 1000;
+    setExport(0.92, "Agregando el audio y guardando…");
+    const form = new FormData();
+    form.append("video", res.blob, "reel.mp4");
+    const a = reel.audio, src = audioSource();
+    if (src && a.mode === "file") {
+      form.append("audio", a.file);
+      form.append("audioStart", src.start);
+    } else if (src && a.mode === "source") {
+      form.append("source", reel.video.id);
+      form.append("sourceStart", src.start);
+    }
+    form.append("volume", $("volume").value);
+    form.append("fadeOut", $("fadeOut").value);
+    form.append("save", "1");
+    form.append("meta", JSON.stringify(reelMeta(comp, res, seconds)));
+    const entry = await api("/api/reels/mux", { method: "POST", body: form, signal: exporting.signal });
+    const link = document.createElement("a");
+    link.href = `/api/reels/${entry.id}/video?download=1`;
+    link.download = `reel-${entry.id}.mp4`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setExport(null, `Listo en ${((performance.now() - started) / 1000).toFixed(1)} s: ${(entry.size / 1e6).toFixed(1)} MB, descargado y guardado en la biblioteca.`);
+    $("expStatus").dataset.done = "1";
+    loadLibrary();
+  } catch (e) {
+    setExport(null, e.name === "AbortError" ? "Exportación cancelada." : "Error: " + e.message);
+    $("expStatus").dataset.done = "1";
+  } finally {
+    exporting = null;
+    $("export").textContent = "Exportar reel (MP4 1080×1920)";
+    refreshUI();
+  }
+});
+
+// ---------- library ----------
+
+async function loadLibrary() {
+  const box = $("library");
+  let list;
+  try {
+    list = await api("/api/reels");
+  } catch (e) {
+    box.innerHTML = "";
+    box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "No se pudo leer la biblioteca: " + e.message }));
+    return;
+  }
+  box.innerHTML = "";
+  if (!list.length) {
+    box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "Todavía no exportaste reels." }));
+    return;
+  }
+  for (const e of list) {
+    const m = e.meta || {};
+    const row = document.createElement("div");
+    row.className = "reel-item";
+    const v = document.createElement("video");
+    v.src = `/api/reels/${e.id}/video#t=${(e.duration * 0.85).toFixed(1)}`; // a frame near the end
+    v.preload = "metadata";
+    v.muted = true;
+    v.title = "Ver";
+    v.addEventListener("click", () => window.open(v.src, "_blank"));
+    const info = document.createElement("div");
+    info.className = "info";
+    const title = document.createElement("strong");
+    title.textContent = (Templates.LIST[m.template]?.name ?? "Reel") + " · " + fmtTime(e.duration);
+    const sub = document.createElement("span");
+    sub.textContent = new Date(e.created).toLocaleString() + " · " + (e.size / 1e6).toFixed(1) + " MB" + (m.texts?.title ? " · " + m.texts.title : "");
+    info.append(title, sub);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const dl = Object.assign(document.createElement("a"), { className: "button", href: `/api/reels/${e.id}/video?download=1`, textContent: "Descargar" });
+    const del = Object.assign(document.createElement("button"), { type: "button", textContent: "Borrar" });
+    del.addEventListener("click", async () => {
+      if (!confirm("¿Borrar este reel de la biblioteca?")) return;
+      await api(`/api/reels/${e.id}`, { method: "DELETE" }).catch((err) => alert(err.message));
+      loadLibrary();
+    });
+    actions.append(dl, del);
+    row.append(v, info, actions);
+    box.append(row);
+  }
+}
+
 refreshUI();
 player.draw();
+loadLibrary();
