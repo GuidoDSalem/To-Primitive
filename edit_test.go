@@ -64,6 +64,14 @@ func TestEditQueued(t *testing.T) {
 
 	before := names(q)
 	*now = now.Add(time.Minute)
+	// What the browser has of the video before the edit.
+	videoURL := ts.URL + "/api/publish/queue/" + url.PathEscape("mona · en.mp4") + "/video"
+	first, _ := http.Get(videoURL)
+	io.Copy(io.Discard, first.Body)
+	etag, lastMod := first.Header.Get("ETag"), first.Header.Get("Last-Modified")
+	if etag == "" || first.Header.Get("Cache-Control") != "no-cache" {
+		t.Errorf("headers %v", first.Header)
+	}
 	body, ct := multipartBody(t, map[string]string{"video": video}, map[string]string{"queue": "mona · en.mp4", "meta": `{"lang":"en","phrases":[{"role":"title","text":"hello"}]}`})
 	if r, err := http.Post(ts.URL+"/api/reels/mux", ct, body); err != nil || r.StatusCode != 200 {
 		t.Fatalf("mux: %v %v", err, r.Status)
@@ -71,6 +79,13 @@ func TestEditQueued(t *testing.T) {
 	q = pub.Overview().Queue
 	if names(q) != before {
 		t.Fatalf("queue %s, was %s", names(q), before)
+	}
+	// The edited video keeps its date, but the browser's copy is no longer good.
+	req, _ := http.NewRequest("GET", videoURL, nil)
+	req.Header.Set("If-None-Match", etag)
+	req.Header.Set("If-Modified-Since", lastMod)
+	if again, _ := http.DefaultClient.Do(req); again.StatusCode != 200 {
+		t.Errorf("edited video answered %d to the old copy", again.StatusCode)
 	}
 	for _, it := range q {
 		if it.Name == "mona · en.mp4" && it.Title != "T en" {

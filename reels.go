@@ -432,7 +432,7 @@ func (srv *server) reelVideo(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Has("download") {
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="reel-%s.mp4"`, r.PathValue("id")))
 	}
-	http.ServeFile(w, r, vpath)
+	serveFresh(w, r, vpath)
 }
 
 func (srv *server) reelDelete(w http.ResponseWriter, r *http.Request) {

@@ -762,8 +762,25 @@ func (srv *server) pubVideo(published bool) func(http.ResponseWriter, *http.Requ
 			pubError(w, err)
 			return
 		}
-		http.ServeFile(w, r, path)
+		serveFresh(w, r, path)
 	}
+}
+
+// serveFresh serves a video that can be replaced in place: an edited
+// reel keeps its old date (to keep its place in the queue), so the
+// browser must check it by content (ETag: size and the dates of the video
+// and its JSON, which is rewritten on every edit) instead of trusting a
+// copy it has.
+func serveFresh(w http.ResponseWriter, r *http.Request, path string) {
+	if fi, err := os.Stat(path); err == nil {
+		tag := fmt.Sprintf("%x-%x", fi.Size(), fi.ModTime().UnixNano())
+		if si, err := os.Stat(sidecarOf(path)); err == nil {
+			tag += fmt.Sprintf("-%x", si.ModTime().UnixNano())
+		}
+		w.Header().Set("ETag", `"`+tag+`"`)
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeFile(w, r, path)
 }
 
 // reelQueue sends a reel from the library to the publishing folder, with a

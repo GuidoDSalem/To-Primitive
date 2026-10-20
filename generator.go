@@ -837,7 +837,7 @@ func (srv *server) genVideo(w http.ResponseWriter, r *http.Request, g *generator
 	if r.URL.Query().Has("download") {
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", strings.ReplaceAll(r.PathValue("name"), " ", "%20")))
 	}
-	http.ServeFile(w, r, path)
+	serveFresh(w, r, path)
 }
 
 // genToQueue moves a generated reel (and its JSON) to the publishing folder.
