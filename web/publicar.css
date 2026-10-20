@@ -43,3 +43,18 @@ code { font-size: 11px; color: var(--accent); }
   width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); font: inherit; font-size: 13px;
 }
+
+/* Generator page: settings checkboxes and the jobs list. */
+.checks { display: flex; flex-direction: column; gap: 2px; }
+.checks .check { margin: 0; color: var(--text); }
+.checks .kinds { color: var(--muted); font-size: 11px; }
+.jobs { display: flex; flex-direction: column; gap: 6px; }
+.job { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 13px; }
+.job .what { overflow-wrap: anywhere; }
+.job .state { color: var(--muted); text-align: right; }
+.job.running .state { color: var(--accent); }
+.job.done .state { color: #7fd18b; }
+.job.error .state, .job .err { color: #ff8a8a; }
+.job progress, .job .err { grid-column: 1 / -1; margin: 0; }
+.job button { justify-self: start; font-size: 12px; padding: 3px 8px; }
+.item .actions a.button { margin: 0; font-size: 12px; padding: 4px 8px; text-align: center; }

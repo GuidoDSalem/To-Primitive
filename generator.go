@@ -1,0 +1,682 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"mime"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// The generator makes reels by itself: every photo or video that appears in
+// the input folder becomes several reels, one per template, saved in the
+// output folder (each with its JSON, the same format the publishing queue
+// reads). Sources already done move to <input>/procesados/.
+//
+// To draw exactly what the editor draws, it opens the reel editor itself in
+// a headless browser (reels.html?auto=<job>), one job at a time; the page
+// loads the source, applies the template's base, waits for the shapes and
+// sends the encoded reel back through /api/reels/mux (job=<id>).
+
+var imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true, ".bmp": true}
+
+// Templates per kind of source (as in web/templates.js), in the order the
+// versions are made.
+var autoTemplates = map[string][]string{
+	"image": {"reveal", "levels", "compare", "curtain", "counter", "loop", "mosaic", "prefer"},
+	"video": {"shapes", "levels", "compare", "curtain", "loop", "mosaic"},
+}
+
+var templateNames = map[string]string{
+	"reveal": "Revelado", "loop": "Loop hipnótico", "shapes": "Video en formas", "levels": "En qué nivel",
+	"compare": "Comparativa", "curtain": "Cortina", "counter": "Contador", "mosaic": "Mosaico de niveles", "prefer": "Cuál preferís",
+}
+
+const (
+	processedDir = "procesados"
+	genStateFile = ".generador.json"
+	jobTimeout   = 40 * time.Minute
+)
+
+// GenSettings: whether the folder is watched, and which templates to make
+// (empty: all the ones that fit the source).
+type GenSettings struct {
+	Enabled   bool     `json:"enabled"`
+	Templates []string `json:"templates"`
+}
+
+type GenJob struct {
+	ID       string    `json:"id"`
+	Source   string    `json:"source"` // file name in the input folder
+	Kind     string    `json:"kind"`   // image | video
+	Template string    `json:"template"`
+	State    string    `json:"state"` // queued | running | done | error
+	Stage    string    `json:"stage,omitempty"`
+	Progress float64   `json:"progress"`
+	Output   string    `json:"output,omitempty"`
+	Error    string    `json:"error,omitempty"`
+	Created  time.Time `json:"created"`
+	Started  time.Time `json:"started,omitzero"`
+	Finished time.Time `json:"finished,omitzero"`
+}
+
+type genState struct {
+	Settings GenSettings   `json:"settings"`
+	Jobs     []*GenJob     `json:"jobs"`
+	Log      []pubLogEntry `json:"log"`
+}
+
+type generator struct {
+	in, out string
+	chrome  string // headless browser ("" = not available)
+	baseURL string // where the browser finds the editor
+	now     func() time.Time
+
+	mu      sync.Mutex
+	state   genState
+	seen    map[string]string // name -> size|mtime at the last scan (to wait until a copy ends)
+	running *exec.Cmd
+	wake    chan struct{}
+	finish  chan string // job ids that ended (done or error)
+}
+
+// findChrome returns the headless browser to use: CHROME_BIN, or the usual names.
+func findChrome() string {
+	if p := os.Getenv("CHROME_BIN"); p != "" {
+		return p
+	}
+	for _, name := range []string{"chromium-browser", "chromium", "google-chrome", "google-chrome-stable"} {
+		if p, err := exec.LookPath(name); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func newGenerator(in, out, chrome, baseURL string) (*generator, error) {
+	for _, d := range []string{filepath.Join(in, processedDir), out} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	g := &generator{in: in, out: out, chrome: chrome, baseURL: baseURL, now: time.Now,
+		seen: map[string]string{}, wake: make(chan struct{}, 1), finish: make(chan string, 4)}
+	g.state.Settings.Enabled = true
+	if b, err := os.ReadFile(filepath.Join(out, genStateFile)); err == nil {
+		json.Unmarshal(b, &g.state)
+	}
+	// Jobs cut by a restart go back to the queue.
+	for _, j := range g.state.Jobs {
+		if j.State == "running" {
+			j.State, j.Stage, j.Progress = "queued", "", 0
+		}
+	}
+	return g, nil
+}
+
+func (g *generator) saveLocked() {
+	// Keep the record short: finished jobs of sources no longer around go away.
+	if len(g.state.Jobs) > 300 {
+		g.state.Jobs = g.state.Jobs[len(g.state.Jobs)-300:]
+	}
+	b, _ := json.MarshalIndent(g.state, "", "  ")
+	tmp := filepath.Join(g.out, genStateFile+".tmp")
+	if os.WriteFile(tmp, b, 0o644) == nil {
+		os.Rename(tmp, filepath.Join(g.out, genStateFile))
+	}
+}
+
+func (g *generator) logLocked(name, action, detail string) {
+	g.state.Log = append(g.state.Log, pubLogEntry{Time: g.now(), Name: name, Action: action, Detail: detail})
+	if len(g.state.Log) > maxLog {
+		g.state.Log = g.state.Log[len(g.state.Log)-maxLog:]
+	}
+	log.Printf("generator: %s %s %s", action, name, detail)
+}
+
+func sourceKind(name string) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	switch {
+	case strings.HasPrefix(name, "."):
+		return ""
+	case imageExts[ext]:
+		return "image"
+	case videoExts[ext]:
+		return "video"
+	}
+	return ""
+}
+
+func (g *generator) templatesFor(kind string) []string {
+	want := map[string]bool{}
+	for _, t := range g.state.Settings.Templates {
+		want[t] = true
+	}
+	var out []string
+	for _, t := range autoTemplates[kind] {
+		if len(want) == 0 || want[t] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// scan queues jobs for sources that appeared (and finished copying) since
+// the last scan.
+func (g *generator) scan() {
+	entries, _ := os.ReadDir(g.in)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	known := map[string]bool{}
+	for _, j := range g.state.Jobs {
+		if j.State != "done" || g.sourceExistsLocked(j.Source) {
+			known[j.Source] = true
+		}
+	}
+	seen := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		kind := sourceKind(name)
+		if e.IsDir() || kind == "" {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		sig := fmt.Sprintf("%d|%d", fi.Size(), fi.ModTime().UnixNano())
+		seen[name] = sig
+		// Wait until it stops changing (a copy in progress) and isn't known.
+		if known[name] || g.seen[name] != sig || g.now().Sub(fi.ModTime()) < 3*time.Second {
+			continue
+		}
+		if !g.state.Settings.Enabled {
+			continue
+		}
+		tpls := g.templatesFor(kind)
+		for _, t := range tpls {
+			g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, State: "queued", Created: g.now()})
+		}
+		g.logLocked(name, "fuente nueva", fmt.Sprintf("%d versiones: %s", len(tpls), strings.Join(tpls, ", ")))
+	}
+	g.seen = seen
+	g.saveLocked()
+}
+
+func (g *generator) sourceExistsLocked(name string) bool {
+	_, err := os.Stat(filepath.Join(g.in, name))
+	return err == nil
+}
+
+func (g *generator) jobLocked(id string) *GenJob {
+	for _, j := range g.state.Jobs {
+		if j.ID == id {
+			return j
+		}
+	}
+	return nil
+}
+
+// next returns the next queued job (nil if none).
+func (g *generator) next() *GenJob {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.state.Settings.Enabled {
+		return nil
+	}
+	for _, j := range g.state.Jobs {
+		if j.State == "queued" && g.sourceExistsLocked(j.Source) {
+			j.State, j.Started, j.Stage, j.Progress, j.Error = "running", g.now(), "abriendo el editor", 0, ""
+			g.saveLocked()
+			return j
+		}
+	}
+	return nil
+}
+
+// run makes one reel: the editor in a headless browser, until the page says
+// it's done, fails, or takes too long.
+func (g *generator) run(ctx context.Context, j *GenJob) {
+	if g.chrome == "" {
+		g.end(j.ID, "", errors.New("no hay un navegador para generar (instalá Chromium o definí CHROME_BIN)"))
+		return
+	}
+	profile, _ := os.MkdirTemp("", "to-primitive-chrome-")
+	defer os.RemoveAll(profile)
+	cctx, cancel := context.WithTimeout(ctx, jobTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, g.chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--mute-audio",
+		"--autoplay-policy=no-user-gesture-required", "--no-first-run", "--hide-scrollbars",
+		"--window-size=1280,900", "--user-data-dir="+profile,
+		g.baseURL+"/reels.html?auto="+j.ID)
+	cmd.Env = append(os.Environ(), "HOME="+profile)
+	if err := cmd.Start(); err != nil {
+		g.end(j.ID, "", fmt.Errorf("no se pudo abrir el navegador: %v", err))
+		return
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	for {
+		select {
+		case id := <-g.finish:
+			if id != j.ID {
+				continue
+			}
+			cmd.Process.Kill()
+			<-exited
+			return
+		case err := <-exited:
+			if cctx.Err() != nil {
+				g.end(j.ID, "", errors.New("tardó demasiado"))
+			} else {
+				g.end(j.ID, "", fmt.Errorf("el navegador se cerró: %v", err))
+			}
+			return
+		}
+	}
+}
+
+// end records how a job ended; once all the versions of a source are done,
+// the source moves to procesados/.
+func (g *generator) end(id, output string, failure error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	j := g.jobLocked(id)
+	if j == nil || j.State != "running" {
+		return
+	}
+	j.Finished = g.now()
+	if failure != nil {
+		j.State, j.Error = "error", failure.Error()
+		g.logLocked(j.Source, "error", templateNames[j.Template]+": "+j.Error)
+	} else {
+		j.State, j.Output, j.Progress, j.Stage = "done", output, 1, ""
+		g.logLocked(output, "generado", fmt.Sprintf("%s · %s en %.0f s", j.Source, templateNames[j.Template], j.Finished.Sub(j.Started).Seconds()))
+	}
+	pending := false
+	for _, o := range g.state.Jobs {
+		pending = pending || (o.Source == j.Source && (o.State == "queued" || o.State == "running"))
+	}
+	if !pending && g.sourceExistsLocked(j.Source) {
+		dest := filepath.Join(g.in, processedDir, j.Source)
+		if err := os.Rename(filepath.Join(g.in, j.Source), dest); err == nil {
+			g.logLocked(j.Source, "fuente procesada", "movida a "+processedDir+"/")
+		} else {
+			g.logLocked(j.Source, "error", "no se pudo mover a "+processedDir+"/: "+err.Error())
+		}
+	}
+	g.saveLocked()
+	select {
+	case g.finish <- id:
+	default:
+	}
+}
+
+// Run scans the folder every few seconds and works through the queue.
+func (g *generator) Run(ctx context.Context) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		g.scan()
+		for j := g.next(); j != nil; j = g.next() {
+			g.run(ctx, j)
+			g.scan()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-g.wake:
+		}
+	}
+}
+
+func (g *generator) poke() {
+	select {
+	case g.wake <- struct{}{}:
+	default:
+	}
+}
+
+// ---------- results ----------
+
+// outputName is "<source> · <template>.mp4", without clashing.
+func (g *generator) outputName(j *GenJob) string {
+	base := strings.TrimSuffix(j.Source, filepath.Ext(j.Source)) + " · " + templateNames[j.Template]
+	name := base + ".mp4"
+	for i := 2; ; i++ {
+		if _, err := os.Stat(filepath.Join(g.out, name)); errors.Is(err, os.ErrNotExist) {
+			return name
+		}
+		name = fmt.Sprintf("%s (%d).mp4", base, i)
+	}
+}
+
+// Complete stores the finished reel of a job (from /api/reels/mux).
+func (g *generator) Complete(id, reelPath string, meta json.RawMessage) (string, error) {
+	g.mu.Lock()
+	j := g.jobLocked(id)
+	if j == nil || j.State != "running" {
+		g.mu.Unlock()
+		return "", errors.New("ese trabajo no está en curso")
+	}
+	name := g.outputName(j)
+	src, tpl := j.Source, j.Template
+	g.mu.Unlock()
+
+	dest := filepath.Join(g.out, name)
+	in, err := os.Open(reelPath)
+	if err != nil {
+		return "", err
+	}
+	err = saveFile(dest, in)
+	in.Close()
+	if err != nil {
+		return "", err
+	}
+	side := map[string]any{"source": src, "template": tpl, "generated": g.now().Format(time.RFC3339), "settings": meta}
+	title, desc := reelTexts(meta)
+	if title != "" {
+		side["title"] = title
+	}
+	side["description"] = strings.TrimSpace(desc + "\n\n#Shorts")
+	writeSidecar(dest, side)
+	g.end(id, name, nil)
+	return name, nil
+}
+
+func (g *generator) Fail(id, msg string) {
+	g.end(id, "", errors.New(msg))
+}
+
+func (g *generator) Progress(id, stage string, fraction float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if j := g.jobLocked(id); j != nil && j.State == "running" {
+		j.Stage, j.Progress = stage, fraction
+	}
+}
+
+// GenOverview is what the generator page shows.
+type GenOverview struct {
+	InDir      string        `json:"in"`
+	OutDir     string        `json:"out"`
+	Browser    string        `json:"browser"`
+	Settings   GenSettings   `json:"settings"`
+	Templates  []string      `json:"templates"` // all, in order
+	Jobs       []*GenJob     `json:"jobs"`      // newest first
+	Outputs    []PubItem     `json:"outputs"`   // newest first
+	Log        []pubLogEntry `json:"log"`
+	Publishing bool          `json:"publishing"` // there's a publishing folder to send them to
+}
+
+func (g *generator) Overview(probe func(string) []PubItem) GenOverview {
+	g.mu.Lock()
+	o := GenOverview{InDir: hostDir("INPUT_HOST_DIR", g.in), OutDir: hostDir("GENERATED_HOST_DIR", g.out), Browser: g.chrome,
+		Settings: g.state.Settings}
+	if o.Settings.Templates == nil {
+		o.Settings.Templates = []string{}
+	}
+	all := map[string]bool{}
+	for _, k := range []string{"image", "video"} {
+		for _, t := range autoTemplates[k] {
+			if !all[t] {
+				all[t] = true
+				o.Templates = append(o.Templates, t)
+			}
+		}
+	}
+	for i := len(g.state.Jobs) - 1; i >= 0; i-- {
+		j := *g.state.Jobs[i]
+		o.Jobs = append(o.Jobs, &j)
+	}
+	if o.Jobs == nil {
+		o.Jobs = []*GenJob{}
+	}
+	for i := len(g.state.Log) - 1; i >= 0; i-- {
+		o.Log = append(o.Log, g.state.Log[i])
+	}
+	g.mu.Unlock()
+	o.Outputs = probe(g.out)
+	sort.Slice(o.Outputs, func(i, j int) bool { return o.Outputs[i].Modified.After(o.Outputs[j].Modified) })
+	if o.Outputs == nil {
+		o.Outputs = []PubItem{}
+	}
+	return o
+}
+
+func hostDir(env, dir string) string {
+	if h := os.Getenv(env); h != "" {
+		return h
+	}
+	return dir
+}
+
+func (g *generator) SetSettings(s GenSettings) {
+	g.mu.Lock()
+	known := map[string]bool{}
+	for _, t := range append(autoTemplates["image"], autoTemplates["video"]...) {
+		known[t] = true
+	}
+	tpls := []string{}
+	for _, t := range s.Templates {
+		if known[t] {
+			tpls = append(tpls, t)
+		}
+	}
+	s.Templates = tpls
+	g.state.Settings = s
+	if s.Enabled {
+		g.logLocked("", "generador", "activo")
+	} else {
+		g.logLocked("", "generador", "pausado")
+	}
+	g.saveLocked()
+	g.mu.Unlock()
+	g.poke()
+}
+
+// Retry puts a failed job back in the queue (and its source, if it was
+// already moved to procesados/).
+func (g *generator) Retry(id string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	j := g.jobLocked(id)
+	if j == nil {
+		return errNotFound
+	}
+	if j.State != "error" {
+		return errors.New("solo se reintentan los que fallaron")
+	}
+	if !g.sourceExistsLocked(j.Source) {
+		if err := os.Rename(filepath.Join(g.in, processedDir, j.Source), filepath.Join(g.in, j.Source)); err != nil {
+			return errors.New("la fuente ya no está")
+		}
+	}
+	j.State, j.Error, j.Stage, j.Progress = "queued", "", "", 0
+	g.saveLocked()
+	defer g.poke()
+	return nil
+}
+
+// ---------- HTTP ----------
+
+func (srv *server) withGenerator(h func(http.ResponseWriter, *http.Request, *generator)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if srv.gen == nil {
+			http.Error(w, "generator not configured", http.StatusServiceUnavailable)
+			return
+		}
+		h(w, r, srv.gen)
+	}
+}
+
+func (srv *server) genOverview(w http.ResponseWriter, r *http.Request, g *generator) {
+	o := g.Overview(func(dir string) []PubItem {
+		// The same description the publishing queue uses (title, duration, warnings).
+		p := &publisher{probe: map[string]mediaInfo{}}
+		if srv.pub != nil {
+			p = srv.pub
+			p.mu.Lock()
+			defer p.mu.Unlock()
+		}
+		return p.videosIn(dir)
+	})
+	o.Publishing = srv.pub != nil
+	writeJSON(w, o)
+}
+
+func (srv *server) genSettings(w http.ResponseWriter, r *http.Request, g *generator) {
+	var s GenSettings
+	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+		http.Error(w, "bad settings: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	g.SetSettings(s)
+	srv.genOverview(w, r, g)
+}
+
+func (srv *server) genJob(w http.ResponseWriter, r *http.Request, g *generator) {
+	g.mu.Lock()
+	j := g.jobLocked(r.PathValue("id"))
+	var out map[string]any
+	if j != nil {
+		out = map[string]any{"id": j.ID, "template": j.Template, "kind": j.Kind,
+			"source": map[string]string{"name": j.Source, "type": mime.TypeByExtension(strings.ToLower(filepath.Ext(j.Source)))}}
+	}
+	g.mu.Unlock()
+	if out == nil {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// genSource serves a job's source. With ?compat, a video comes as WebM
+// (VP9 + Opus): browsers without H.264 (open-source Chromium builds) can
+// still play it.
+func (srv *server) genSource(w http.ResponseWriter, r *http.Request, g *generator) {
+	g.mu.Lock()
+	j := g.jobLocked(r.PathValue("id"))
+	g.mu.Unlock()
+	if j == nil {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+	path := filepath.Join(g.in, j.Source)
+	if r.URL.Query().Has("compat") && j.Kind == "video" {
+		compat := filepath.Join(srv.dataDir, "compat-"+j.ID+".webm")
+		if _, err := os.Stat(compat); err != nil {
+			tmp := compat + ".part.webm"
+			_, err := runFFmpeg(r.Context(), "ffmpeg", "-v", "error", "-y", "-i", path,
+				"-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1", "-b:v", "4M",
+				"-c:a", "libopus", "-b:a", "128k", tmp)
+			if err == nil {
+				err = os.Rename(tmp, compat)
+			}
+			if err != nil {
+				os.Remove(tmp)
+				http.Error(w, "no se pudo convertir el video: "+err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "video/webm")
+		path = compat
+	}
+	http.ServeFile(w, r, path)
+}
+
+func (srv *server) genProgress(w http.ResponseWriter, r *http.Request, g *generator) {
+	var body struct {
+		Stage    string  `json:"stage"`
+		Fraction float64 `json:"fraction"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	g.Progress(r.PathValue("id"), body.Stage, body.Fraction)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (srv *server) genFail(w http.ResponseWriter, r *http.Request, g *generator) {
+	var body struct {
+		Error string `json:"error"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if body.Error == "" {
+		body.Error = "falló sin explicación"
+	}
+	g.Fail(r.PathValue("id"), body.Error)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (srv *server) genRetry(w http.ResponseWriter, r *http.Request, g *generator) {
+	if err := g.Retry(r.PathValue("id")); err != nil {
+		pubError(w, err)
+		return
+	}
+	srv.genOverview(w, r, g)
+}
+
+func (g *generator) outputPath(name string) (string, error) {
+	if !validName(name) {
+		return "", errors.New("nombre inválido")
+	}
+	path := filepath.Join(g.out, name)
+	if _, err := os.Stat(path); err != nil {
+		return "", errNotFound
+	}
+	return path, nil
+}
+
+func (srv *server) genVideo(w http.ResponseWriter, r *http.Request, g *generator) {
+	path, err := g.outputPath(r.PathValue("name"))
+	if err != nil {
+		pubError(w, err)
+		return
+	}
+	if r.URL.Query().Has("download") {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", strings.ReplaceAll(r.PathValue("name"), " ", "%20")))
+	}
+	http.ServeFile(w, r, path)
+}
+
+// genToQueue moves a generated reel (and its JSON) to the publishing folder.
+func (srv *server) genToQueue(w http.ResponseWriter, r *http.Request, g *generator) {
+	if srv.pub == nil {
+		http.Error(w, "publisher not configured", http.StatusServiceUnavailable)
+		return
+	}
+	path, err := g.outputPath(r.PathValue("name"))
+	if err != nil {
+		pubError(w, err)
+		return
+	}
+	got, err := srv.pub.Add(path, filepath.Base(path), readSidecar(path), "desde los generados")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	os.Remove(path)
+	os.Remove(sidecarOf(path))
+	writeJSON(w, map[string]string{"name": got})
+}
+
+func (srv *server) genDelete(w http.ResponseWriter, r *http.Request, g *generator) {
+	path, err := g.outputPath(r.PathValue("name"))
+	if err != nil {
+		pubError(w, err)
+		return
+	}
+	os.Remove(path)
+	os.Remove(sidecarOf(path))
+	w.WriteHeader(http.StatusNoContent)
+}

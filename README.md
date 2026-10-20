@@ -185,6 +185,18 @@ La vista previa reproduce el reel o el original. Si cambiás el encuadre, la por
 Próximas etapas: una cola de publicación con una regla configurable (por ejemplo, un reel por día a cierta hora) y la publicación automática.
 
 
+
+## Generar reels automáticamente
+
+`/generar.html` (enlace "generar" arriba de los editores). Cada foto o video que dejes en la **carpeta de entrada** se convierte sola en varios reels, **uno por template** (los que correspondan: algunos son solo para fotos o solo para videos), con la configuración base de cada uno. Los reels van a la **carpeta de generados**, cada uno con su JSON (título y descripción sacados de sus frases, más el registro de cómo se hizo), aparte de la carpeta de publicación. Cuando están todas las versiones, la fuente pasa a `procesados/` dentro de la entrada.
+
+- En la página se elige qué templates generar y se puede pausar. Muestra cada trabajo con su avance, los errores (con **Reintentar**) y los reels generados, que se pueden ver, descargar, borrar o mandar **A la cola** de publicación.
+- Las fuentes se toman cuando terminan de copiarse (el tamaño deja de cambiar) y se procesan de a una. Si el servidor se reinicia, lo que estaba a medio hacer vuelve a la cola.
+- **Cómo funciona:** para que los reels salgan idénticos a los del editor, el servidor abre el mismo editor de reels en un **Chromium sin pantalla** (`reels.html?auto=<trabajo>`). Esa página carga la fuente, elige el template con su base, espera las formas (o calcula el video), exporta y devuelve el MP4. Si el navegador no puede reproducir el video (Chromium sin H.264), el servidor le da una copia en WebM. La imagen de Docker trae Chromium y las fuentes (con emoji). Sin Docker hace falta tener Chromium o Chrome instalado (`CHROME_BIN` para indicar cuál).
+- Cada reel tarda aproximadamente 1 minuto (30 s a 1 min con 150 formas; más con Mosaico, de 500, o con ¿Cuál preferís?, que calcula cuatro tipos de forma).
+
+**Carpetas con Docker** (en `.env`, ver `.env.example`): `INPUT_HOST_DIR` (entrada, se monta en `/entrada`) y `GENERATED_HOST_DIR` (generados, en `/generados`). Sin Docker: `-input` / `INPUT_DIR` (por defecto `./entrada`) y `-generated` / `GENERATED_DIR` (por defecto `./generados`).
+
 ## Publicar
 
 `/publicar.html` (enlace "publicar" arriba de los editores) maneja la cola de publicación.
@@ -344,6 +356,12 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/publish/queue/{name}/skip` | Saltear o incluir (`skip`) |
 | `POST /api/publish/queue/{name}/now` | Publicar ya |
 | `POST /api/publish/published/{name}/requeue` | Devolver un publicado a la cola (primero) |
+| `GET /api/auto` | Generador: ajustes, trabajos, reels generados y registro |
+| `PUT /api/auto/settings` | `enabled` y `templates` (vacío = todos) |
+| `GET /api/auto/jobs/{id}` · `/source` | Lo que la página automática necesita: template y fuente (`?compat` = video en WebM) |
+| `POST /api/auto/jobs/{id}/progress` · `/fail` · `/retry` | Avance, error y reintento de un trabajo |
+| `GET /api/auto/outputs/{name}/video` · `POST …/queue` · `DELETE` | Ver, mandar a la cola de publicación o borrar un reel generado |
+| `POST /api/reels/mux` con `job` | El reel terminado de un trabajo (va a la carpeta de generados) |
 
 La biblioteca de reels vive en `REELS_DIR` (o `-reels`), por defecto `./reels`. A diferencia de los archivos subidos, no se borra al reiniciar. En Docker es el volumen `reels` (montado en `/reels`).
 

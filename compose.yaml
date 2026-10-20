@@ -4,14 +4,22 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    # Chromium (used by the generator) needs some shared memory.
+    shm_size: "512mb"
     environment:
-      # Only to show it on the publishing page.
+      # Only to show them on the pages.
       PUBLISH_HOST_DIR: "${PUBLISH_HOST_DIR:-./publicar}"
+      INPUT_HOST_DIR: "${INPUT_HOST_DIR:-./entrada}"
+      GENERATED_HOST_DIR: "${GENERATED_HOST_DIR:-./generados}"
     volumes:
       - reels:/reels
-      # The folder the publisher takes videos from (set PUBLISH_HOST_DIR in
-      # .env, see .env.example); published ones move to publicados/ inside.
+      # Folders on this computer (set them in .env, see .env.example):
+      # videos to publish (published ones move to publicados/ inside),
       - "${PUBLISH_HOST_DIR:-./publicar}:/publicar"
+      # photos and videos to turn into reels (done ones move to procesados/),
+      - "${INPUT_HOST_DIR:-./entrada}:/entrada"
+      # and the reels generated from them.
+      - "${GENERATED_HOST_DIR:-./generados}:/generados"
 
 volumes:
   reels:

@@ -53,6 +53,7 @@ type server struct {
 	dataDir string
 	lib     *library
 	pub     *publisher // nil: publishing not configured
+	gen     *generator // nil: automatic generation not configured
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -65,6 +66,8 @@ func main() {
 	dataDir := flag.String("data", envOr("DATA_DIR", filepath.Join(os.TempDir(), "to-primitive")), "directory for uploaded videos")
 	reelsDir := flag.String("reels", envOr("REELS_DIR", "reels"), "directory where finished reels are kept")
 	publishDir := flag.String("publish", envOr("PUBLISH_DIR", "publicar"), "folder of videos waiting to be published")
+	inputDir := flag.String("input", envOr("INPUT_DIR", "entrada"), "folder of photos and videos to turn into reels automatically")
+	generatedDir := flag.String("generated", envOr("GENERATED_DIR", "generados"), "folder where automatically generated reels go")
 	flag.Parse()
 
 	// Videos don't survive a restart (sessions live in memory), so start clean.
@@ -84,6 +87,20 @@ func main() {
 	}
 	srv.pub = pub
 	go pub.Run(context.Background(), 30*time.Second)
+	// The generator drives the editor in a headless browser, through this server.
+	port := *addr
+	if i := strings.LastIndex(port, ":"); i >= 0 {
+		port = port[i+1:]
+	}
+	gen, err := newGenerator(*inputDir, *generatedDir, findChrome(), "http://127.0.0.1:"+port)
+	if err != nil {
+		log.Fatal(err)
+	}
+	srv.gen = gen
+	if gen.chrome == "" {
+		log.Printf("generator: no headless browser found (install Chromium or set CHROME_BIN); reels won't be generated")
+	}
+	go gen.Run(context.Background())
 	log.Printf("To-Primitive listening on %s (reels in %s, publishing from %s)", *addr, *reelsDir, *publishDir)
 	log.Fatal(http.ListenAndServe(*addr, srv.routes()))
 }
@@ -134,6 +151,17 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/publish/queue/{name}/video", srv.withPublisher(srv.pubVideo(false)))
 	mux.HandleFunc("POST /api/publish/published/{name}/requeue", srv.withPublisher(srv.pubRequeue))
 	mux.HandleFunc("GET /api/publish/published/{name}/video", srv.withPublisher(srv.pubVideo(true)))
+
+	mux.HandleFunc("GET /api/auto", srv.withGenerator(srv.genOverview))
+	mux.HandleFunc("PUT /api/auto/settings", srv.withGenerator(srv.genSettings))
+	mux.HandleFunc("GET /api/auto/jobs/{id}", srv.withGenerator(srv.genJob))
+	mux.HandleFunc("GET /api/auto/jobs/{id}/source", srv.withGenerator(srv.genSource))
+	mux.HandleFunc("POST /api/auto/jobs/{id}/progress", srv.withGenerator(srv.genProgress))
+	mux.HandleFunc("POST /api/auto/jobs/{id}/fail", srv.withGenerator(srv.genFail))
+	mux.HandleFunc("POST /api/auto/jobs/{id}/retry", srv.withGenerator(srv.genRetry))
+	mux.HandleFunc("GET /api/auto/outputs/{name}/video", srv.withGenerator(srv.genVideo))
+	mux.HandleFunc("POST /api/auto/outputs/{name}/queue", srv.withGenerator(srv.genToQueue))
+	mux.HandleFunc("DELETE /api/auto/outputs/{name}", srv.withGenerator(srv.genDelete))
 	return mux
 }
 

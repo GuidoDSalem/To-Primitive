@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive · Generar</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="publicar.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Generar reels</h1>
+      <p class="sub">Fotos y videos → varios reels por fuente, solos · <a href="reels.html">editor de reels</a> · <a href="publicar.html">publicar</a></p>
+    </header>
+
+    <section>
+      <h2>Generador</h2>
+      <label class="check big"><input id="enabled" type="checkbox"> Generar automáticamente</label>
+      <p class="hint">Cada foto o video que aparezca en la carpeta de entrada se convierte en un reel por cada template marcado (los que corresponden: algunos son solo para fotos o solo para videos), con la configuración base de cada uno. Se hacen de a uno.</p>
+      <div class="field" style="margin-top:12px">
+        <label>Templates</label>
+        <div id="templates" class="checks"></div>
+      </div>
+      <button id="save" class="wide primary">Guardar</button>
+      <p id="saveStatus" class="hint"></p>
+    </section>
+
+    <section>
+      <h2>Carpetas</h2>
+      <p id="inInfo" class="hint"></p>
+      <p id="outInfo" class="hint"></p>
+      <p id="browserInfo" class="hint"></p>
+    </section>
+
+    <section>
+      <h2>Registro</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+  </aside>
+
+  <main id="stage" class="pub-stage">
+    <div class="pub-head">
+      <h2>Trabajos <span id="jobCount" class="count"></span></h2>
+      <button id="refresh" type="button">Actualizar</button>
+    </div>
+    <div id="jobs" class="jobs"></div>
+
+    <h2 style="margin-top:28px">Generados <span id="outCount" class="count"></span></h2>
+    <div id="outputs" class="items"></div>
+  </main>
+
+  <script src="templates.js"></script>
+  <script src="generar.js"></script>
+</body>
+</html>

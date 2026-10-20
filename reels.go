@@ -314,6 +314,16 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	// job=<id>: a reel the generator asked for (saved in its output folder).
+	if job := r.FormValue("job"); job != "" && srv.gen != nil {
+		name, err := srv.gen.Complete(job, out, json.RawMessage(r.FormValue("meta")))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		writeJSON(w, map[string]string{"name": name})
+		return
+	}
 	// save=1: keep it in the library (with meta) and answer with its entry.
 	if r.FormValue("save") != "" {
 		f, err := os.Open(out)

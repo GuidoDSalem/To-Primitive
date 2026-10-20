@@ -579,7 +579,7 @@ func (p *publisher) Requeue(name string) error {
 
 // Add copies a video into the queue folder (e.g. from the reel library),
 // with its JSON. It returns the name it got.
-func (p *publisher) Add(src, name string, meta map[string]any) (string, error) {
+func (p *publisher) Add(src, name string, meta map[string]any, from string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !validName(name) {
@@ -604,7 +604,7 @@ func (p *publisher) Add(src, name string, meta map[string]any) (string, error) {
 	if err := writeSidecar(dest, meta); err != nil {
 		return "", err
 	}
-	p.logLocked(filepath.Base(dest), "agregado", "desde el editor de reels")
+	p.logLocked(filepath.Base(dest), "agregado", from)
 	return filepath.Base(dest), p.saveLocked()
 }
 
@@ -780,7 +780,7 @@ func (srv *server) reelQueue(w http.ResponseWriter, r *http.Request, p *publishe
 	if entry.Created.IsZero() {
 		name = "reel " + r.PathValue("id") + ".mp4"
 	}
-	got, err := p.Add(vpath, name, meta)
+	got, err := p.Add(vpath, name, meta, "desde el editor de reels")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

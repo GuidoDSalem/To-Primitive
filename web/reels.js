@@ -1430,6 +1430,39 @@ function setExport(fraction, text) {
   $("expStatus").textContent = text;
 }
 
+// Draw every frame at 1080x1920, encode it and send it with its sound to
+// the server; extra form fields say where it goes (save=1: the library;
+// job=<id>: the generator). onProgress(fraction, text). Returns the answer.
+async function encodeAndSend(comp, extra, signal, onProgress) {
+  const started = performance.now();
+  const bufs = buffers();
+  const res = await Motion.encodeMP4({
+    width: 1080, height: 1920, duration: comp.duration,
+    prepare: (t) => seekSourceFor(comp, t),
+    render: (ctx, t, w, h) => renderReel(ctx, comp, t, w, h, bufs),
+  }, {
+    fps: 30, longSide: 1920, signal,
+    onProgress: (f) => onProgress(f * 0.9, `Codificando: ${Math.round(f * 100)} %`),
+  });
+  const seconds = (performance.now() - started) / 1000;
+  onProgress(0.92, "Agregando el audio y guardando…");
+  const form = new FormData();
+  form.append("video", res.blob, "reel.mp4");
+  const a = reel.audio, src = audioSource();
+  if (src && a.mode === "file") {
+    form.append("audio", a.file);
+    form.append("audioStart", src.start);
+  } else if (src && a.mode === "source") {
+    form.append("source", reel.video.id);
+    form.append("sourceStart", src.start);
+  }
+  form.append("volume", $("volume").value);
+  form.append("fadeOut", $("fadeOut").value);
+  for (const [k, v] of Object.entries(extra)) form.append(k, v);
+  form.append("meta", JSON.stringify(reelMeta(comp, res, seconds)));
+  return api("/api/reels/mux", { method: "POST", body: form, signal });
+}
+
 $("export").addEventListener("click", async () => {
   if (exporting) {
     exporting.abort();
@@ -1445,32 +1478,7 @@ $("export").addEventListener("click", async () => {
   delete $("expStatus").dataset.done;
   const started = performance.now();
   try {
-    const bufs = buffers();
-    const res = await Motion.encodeMP4({
-      width: 1080, height: 1920, duration: comp.duration,
-      prepare: (t) => seekSourceFor(comp, t),
-      render: (ctx, t, w, h) => renderReel(ctx, comp, t, w, h, bufs),
-    }, {
-      fps: 30, longSide: 1920, signal: exporting.signal,
-      onProgress: (f) => setExport(f * 0.9, `Codificando: ${Math.round(f * 100)} %`),
-    });
-    const seconds = (performance.now() - started) / 1000;
-    setExport(0.92, "Agregando el audio y guardando…");
-    const form = new FormData();
-    form.append("video", res.blob, "reel.mp4");
-    const a = reel.audio, src = audioSource();
-    if (src && a.mode === "file") {
-      form.append("audio", a.file);
-      form.append("audioStart", src.start);
-    } else if (src && a.mode === "source") {
-      form.append("source", reel.video.id);
-      form.append("sourceStart", src.start);
-    }
-    form.append("volume", $("volume").value);
-    form.append("fadeOut", $("fadeOut").value);
-    form.append("save", "1");
-    form.append("meta", JSON.stringify(reelMeta(comp, res, seconds)));
-    const entry = await api("/api/reels/mux", { method: "POST", body: form, signal: exporting.signal });
+    const entry = await encodeAndSend(comp, { save: "1" }, exporting.signal, setExport);
     const link = document.createElement("a");
     link.href = `/api/reels/${entry.id}/video?download=1`;
     link.download = `reel-${entry.id}.mp4`;
@@ -1554,3 +1562,55 @@ async function loadLibrary() {
 refreshUI();
 player.draw();
 loadLibrary();
+
+// ---------- automatic mode ----------
+
+// reels.html?auto=<job>: the server's generator opens the editor in a
+// headless browser to make one reel by itself, with exactly the same code
+// as by hand: load the source, choose the template (its base), wait for the
+// shapes, export.
+const AUTO = new URLSearchParams(location.search).get("auto");
+if (AUTO) runAuto(AUTO);
+
+async function runAuto(id) {
+  const post = (what, body) => api(`/api/auto/jobs/${id}/${what}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const report = (stage, fraction) => post("progress", { stage, fraction: Math.max(0, Math.min(1, fraction || 0)) }).catch(() => {});
+  const until = async (cond, what, ms, tick) => {
+    const t0 = performance.now();
+    while (!cond()) {
+      if (performance.now() - t0 > ms) throw new Error("tiempo agotado esperando " + what);
+      tick?.();
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  };
+  try {
+    const job = await api(`/api/auto/jobs/${id}`);
+    report("cargando la fuente", 0);
+    const load = async (query, name, type) => {
+      const res = await fetch(`/api/auto/jobs/${id}/source${query}`);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      await loadSource(new File([blob], name, { type: type || blob.type }));
+    };
+    await load("", job.source.name, job.source.type);
+    if (!reel.kind && job.kind === "video") {
+      // This browser can't play it (no H.264?): ask for a WebM copy.
+      report("convirtiendo el video para el navegador", 0);
+      await load("?compat", job.source.name.replace(/\.\w+$/, "") + ".webm", "video/webm");
+    }
+    if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
+    reel.template = job.template;
+    applyBase(true);
+    restartLiveSoon(); // the template may frame differently
+    refreshUI();
+    if (reel.kind === "video") {
+      $("generate").click();
+      await until(() => !reel.generating, "el cálculo del video", 30 * 60e3, () => report("calculando el video", +$("genProgress").value));
+      if (!reel.gen || stale()) throw new Error($("genStatus").textContent || "no se pudo calcular el video");
+    }
+    await until(() => !!composition(), "las formas", 30 * 60e3, () => report("buscando formas", live.count / params().shapes));
+    await encodeAndSend(composition(), { job: id }, undefined, (f, text) => report(text, f));
+  } catch (e) {
+    await post("fail", { error: String(e?.message || e) }).catch(() => {});
+  }
+}
