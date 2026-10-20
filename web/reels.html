@@ -41,6 +41,7 @@
         <h2>2 · Template</h2>
         <div id="templates" class="tpl-grid"></div>
         <p id="tplInfo" class="hint"></p>
+        <button id="restoreBase" class="wide" hidden>Volver a la configuración base del template</button>
       </section>
 
       <section>
@@ -196,20 +197,14 @@
       </section>
 
       <section>
-        <h2>8 · Textos</h2>
-        <div class="field">
-          <label for="tTitle">Título (gancho del principio)</label>
-          <textarea id="tTitle" rows="2" placeholder="Ej.: Esto es la Mona Lisa hecha con 150 triángulos"></textarea>
-        </div>
-        <div class="field">
-          <label for="tClosing">Cierre</label>
-          <textarea id="tClosing" rows="2" placeholder="Ej.: ¿Cuál hago mañana? 👇"></textarea>
-        </div>
-        <div class="field">
-          <label for="tBrand">Marca</label>
+        <h2>8 · Frases</h2>
+        <div id="phrases" class="phrases"></div>
+        <button id="addPhrase" class="wide">＋ Agregar frase</button>
+        <p class="hint">Aparecen y desaparecen con un fundido, siempre fuera de las zonas que tapan las apps. Los tiempos se ajustan solos si cambia la duración. Podés usar <code>{formas}</code> (cantidad) y <code>{tipo}</code> (triángulos, círculos…).</p>
+        <div class="field" style="margin-top:12px">
+          <label for="tBrand">Marca (todo el reel)</label>
           <input id="tBrand" type="text" placeholder="@tucuenta">
         </div>
-        <p class="hint">Todos opcionales. Se ubican fuera de las zonas que tapan las apps.</p>
       </section>
 
       <section>

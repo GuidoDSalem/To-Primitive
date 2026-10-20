@@ -68,3 +68,13 @@ textarea, input[type=text] {
   width: 100%; padding: 6px 8px; border-radius: 6px; resize: vertical;
   border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
 }
+
+/* Phrases: one card each. */
+.phrases { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.phrase { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.phrase .meta { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; }
+.phrase .times { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.phrase select, .phrase input[type=number] { width: 100%; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
+.phrase .del { padding: 2px 8px; }
+.phrase .role { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+code { font-size: 11px; color: var(--accent); }

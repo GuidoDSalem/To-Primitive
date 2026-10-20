@@ -152,6 +152,8 @@ En el navegador, con cámara simulada en Chrome:
    | **Video en formas** | Video | La porción en formas y, en el tramo final, un fundido al video original. |
 
    *Automático* elige Revelado para fotos y Video en formas para videos.
+
+   Cada template tiene su **configuración base** (duración, cantidad y tipo de formas, animación y frases), que se carga al elegirlo. Lo que cambiaste a mano se respeta al pasar de un template a otro, y *Volver a la configuración base del template* lo restaura todo (los textos escritos se mantienen). Revelado y Video en formas arrancan en 15 s; el Loop, en 10 s.
 3. **Duración.** Atajos de 10, 15, 30 y 60 s, o libre (3 a 90 s). En los videos fija el largo de la porción (la mitad en el loop, que va y vuelve). Si elegís la porción a mano, pasa a ser libre.
 4. **Encuadre 9:16.**
    - *Llenar* recorta: zoom, posición, y también arrastrar la vista previa o usar la rueda del mouse.
@@ -164,7 +166,7 @@ En el navegador, con cámara simulada en Chrome:
 7. **Animación.**
    - Fotos: las opciones de la grabación del editor, con sus tarjetas animadas: orden de aparición, velocidad (curva de easing, en Revelado), efecto y duración del efecto. Se aplican al instante, sin recalcular.
    - Videos: keyframes por segundo, seguimiento del movimiento, flujo óptico e interpolación. *Calcular el video* procesa el tramo con el recorte elegido (pausa la sesión de prueba para liberar la CPU); si después cambiás algo que afecta el cálculo, avisa que hay que calcular de nuevo. La interpolación se aplica al instante.
-8. **Textos.** Título (el gancho del principio), cierre y marca, todos opcionales. Aparecen con un fundido y un leve movimiento, con sombra, y quedan fuera de las zonas que tapan las apps; si no entran, se achican.
+8. **Frases.** Las del template vienen cargadas (en los actuales, título y cierre) y se pueden agregar más. Cada una tiene texto, posición (arriba, centro, abajo), estilo (título, subtítulo, pregunta o etiqueta con fondo) y desde/hasta en segundos, que se reajustan solos si cambia la duración. Aparecen con un fundido y un leve movimiento, con sombra, y quedan fuera de las zonas que tapan las apps; si no entran, se achican. Pueden usar `{formas}` y `{tipo}` ("La Mona Lisa con {formas} {tipo}" → "La Mona Lisa con 150 triángulos"). La **marca** se ve durante todo el reel.
 9. **Audio.** Sin sonido, el sonido del video (el tramo elegido) o un archivo propio, desde el segundo que elijas. Con volumen y fundido de salida. Se escucha al reproducir la vista previa.
 10. **Exportar.** El navegador dibuja cada cuadro a 1080×1920 y 30 fps y lo codifica en H.264 (WebCodecs); el servidor le agrega el audio en AAC (recortado a la duración del reel, rellenado con silencio si es más corto y con el fundido) y lo guarda en la biblioteca. El MP4 se descarga solo y está listo para subir a TikTok, Reels o Shorts. Si el navegador solo puede codificar VP9, el servidor lo convierte a H.264.
 
@@ -172,7 +174,7 @@ En el navegador, con cámara simulada en Chrome:
 
 Exportar un reel de 10 s de una foto con 100 formas tarda unos 9 s; uno de 2,5 s de video, unos 4 s (más el cálculo de las formas).
 
-La vista previa reproduce el reel o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo. Los templates viven en `web/templates.js`: cada uno es una función del tiempo, así la exportación dibuja exactamente los mismos cuadros que la vista previa.
+La vista previa reproduce el reel o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo. Los templates viven en `web/templates.js`, cada uno como una receta: su configuración base, el recorte sobre el que se calculan las formas, el contenido como función del tiempo (así la exportación dibuja exactamente los mismos cuadros que la vista previa) y sus frases, con tiempos relativos a la duración.
 
 Próximas etapas: una cola de publicación con una regla configurable (por ejemplo, un reel por día a cierta hora) y la publicación automática.
 

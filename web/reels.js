@@ -26,6 +26,8 @@ const reel = {
   template: "auto",
   duration: { preset: "15", free: 20 },
   audio: { mode: "none", file: null, url: null }, // mode: "none" | "source" | "file"
+  phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
+  touched: new Set(), // settings changed by hand: a template's base doesn't override them
   gen: null,        // generated shapes: { key, image } (photo) or { key, anim } (video)
   generating: null, // { cancel() } while generating
 };
@@ -116,7 +118,8 @@ function paintOriginal(ctx, w, h, over = false) {
 // ---------- template, duration and texts ----------
 
 const templateId = () => (reel.template === "auto" ? Templates.auto(reel.kind) : reel.template);
-const texts = () => ({ title: $("tTitle").value, closing: $("tClosing").value, brand: $("tBrand").value });
+// Values the phrases can mention: "{formas} {tipo}" → "150 triángulos".
+const textVars = () => ({ formas: params().shapes, tipo: Templates.SHAPE_NAMES[params().mode] ?? "formas" });
 
 // Requested length of the reel, in seconds.
 function reelSeconds() {
@@ -132,13 +135,12 @@ const portionFactor = () => (templateId() === "loop" ? 2 : 1);
 // nothing (current) to show. Cached per shapes, template and duration.
 function composition(id = templateId()) {
   if (!reel.gen || stale() || !Templates.LIST[id].kinds.includes(reel.kind)) return null;
-  const hasClosing = !!$("tClosing").value.trim();
   const build = buildOpts(), interp = $("interp").value;
-  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, hasClosing, build, interp]);
+  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp]);
   const cache = (reel.gen.comps ??= new Map());
   if (!cache.has(key)) {
     cache.set(key, Templates.make(id, {
-      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, duration: reelSeconds(), hasClosing, build, interp,
+      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, duration: reelSeconds(), build, interp,
       paintOriginal: (ctx, w, h) => paintOriginal(ctx, w, h, true),
     }));
   }
@@ -148,7 +150,9 @@ function composition(id = templateId()) {
 // A full frame of the reel at time t: framed content plus texts.
 function renderReel(ctx, comp, t, W, H, bufs) {
   drawFramed(ctx, W, H, (c, w, h) => comp.paint(c, t, w, h), bufs);
-  Templates.draw(ctx, W, H, texts(), comp.textAlpha(t));
+  // Another template (a card) shows with its own phrases, carrying the texts.
+  const phrases = comp.id === templateId() ? reel.phrases : Templates.phrasesFor(comp.id, reel.phrases);
+  Templates.drawTexts(ctx, W, H, t, comp.duration, phrases, textVars(), $("tBrand").value);
 }
 
 // ---------- shape parameters (as in the editor) ----------
@@ -463,7 +467,9 @@ function setView(v) {
 }
 $("viewMode").addEventListener("click", (e) => {
   const b = e.target.closest("button");
-  if (b && !b.disabled) setView(b.dataset.value);
+  if (!b || b.disabled) return;
+  reel.backToReel = false; // the person chose
+  setView(b.dataset.value);
 });
 
 const shownReel = () => (view === "reel" ? composition() : null);
@@ -653,6 +659,7 @@ const cards = (() => {
     $("templates").append(b);
     b.addEventListener("click", () => {
       reel.template = id;
+      applyBase();
       if (reel.kind === "video") applyDuration();
       refreshUI();
       player.seek(0);
@@ -717,25 +724,148 @@ $("durPreset").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   reel.duration.preset = b.dataset.value;
+  reel.touched.add("duration");
   applyDuration();
   refreshUI();
   player.seek(0);
 });
 $("durFree").addEventListener("input", () => {
   reel.duration.free = +$("durFree").value;
+  reel.touched.add("duration");
   applyDuration();
   refreshUI();
   player.draw();
 });
 
-// ---------- texts ----------
+// ---------- template base configuration ----------
 
-for (const id of ["tTitle", "tClosing", "tBrand"]) {
-  $(id).addEventListener("input", () => {
-    refreshUI();
-    if (!player.playing) player.draw();
-  });
+const PRESETS = ["10", "15", "30", "60"];
+
+// Load the chosen template's base configuration into the controls, except
+// what was changed by hand (force: everything, back to the base).
+function applyBase(force = false) {
+  if (!reel.kind) return;
+  const id = templateId(), base = Templates.LIST[id].base;
+  if (force) reel.touched.clear();
+  const touched = reel.touched;
+  if (!touched.has("duration")) {
+    const v = String(base.duration);
+    reel.duration = PRESETS.includes(v) ? { ...reel.duration, preset: v } : { preset: "free", free: base.duration };
+    $("durFree").value = reel.duration.free;
+    applyDuration();
+  }
+  let changed = false;
+  if (!touched.has("shapes") && +$("shapes").value !== base.shapes) {
+    $("shapes").value = base.shapes;
+    changed = true;
+  }
+  if (!touched.has("mode") && params().mode !== base.mode) {
+    for (const x of $("mode").children) x.classList.toggle("on", +x.dataset.value === base.mode);
+    changed = true;
+  }
+  if (!touched.has("build")) {
+    $("recOrder").value = base.build.order;
+    $("recCurve").value = base.build.curve;
+    $("recEffect").value = base.build.effect;
+    $("recEffectTime").value = base.build.effectTime;
+    for (const sel of ["recOrder", "recCurve", "recEffect"]) $(sel).dispatchEvent(new Event("change"));
+    Picker.refresh();
+  }
+  if (!touched.has("phrases")) reel.phrases = Templates.phrasesFor(id, reel.phrases);
+  reel.base = id;
+  renderPhrases();
+  if (changed) sendParams();
+  else refreshUI();
 }
+$("restoreBase").addEventListener("click", () => {
+  applyBase(true);
+  player.seek(0);
+});
+
+// Changing these by hand keeps them when switching templates.
+$("shapes").addEventListener("input", () => reel.touched.add("shapes"));
+$("mode").addEventListener("click", (e) => { if (e.target.closest("button")) reel.touched.add("mode"); });
+for (const id of ["recOrder", "recCurve", "recEffect", "recEffectTime"]) $(id).addEventListener("input", () => reel.touched.add("build"));
+
+// ---------- phrases ----------
+
+const ROLE_NAMES = { title: "Título", closing: "Cierre" };
+
+// Length of the reel as it would play now, for the phrases' seconds.
+function reelLength() {
+  return composition()?.duration ?? (reel.kind === "video" ? portionLength() * portionFactor() : reelSeconds());
+}
+
+function phrasesChanged(layout) {
+  if (layout) reel.touched.add("phrases");
+  refreshUI();
+  if (!player.playing) player.draw();
+}
+
+// One card per phrase: text, position, style, and when it shows (seconds).
+function renderPhrases() {
+  const box = $("phrases");
+  box.replaceChildren();
+  reel.phrases.forEach((p, i) => {
+    const card = document.createElement("div");
+    card.className = "phrase";
+    const role = Object.assign(document.createElement("span"), { className: "role", textContent: ROLE_NAMES[p.role] ?? `Frase ${i + 1}` });
+    const text = Object.assign(document.createElement("textarea"), { rows: 2, value: p.text, placeholder: p.role === "title" ? "Ej.: La Mona Lisa con {formas} {tipo}" : p.role === "closing" ? "Ej.: ¿Cuál hago mañana? 👇" : "Texto" });
+    text.dataset.role = p.role;
+    text.addEventListener("input", () => { p.text = text.value; phrasesChanged(false); });
+    const select = (options, value, key) => {
+      const sel = document.createElement("select");
+      sel.append(...Object.entries(options).map(([v, label]) => new Option(label, v, false, v === value)));
+      sel.addEventListener("input", () => { p[key] = sel.value; phrasesChanged(true); });
+      return sel;
+    };
+    const del = Object.assign(document.createElement("button"), { type: "button", className: "del", textContent: "✕", title: "Quitar" });
+    del.addEventListener("click", () => {
+      reel.phrases.splice(i, 1);
+      renderPhrases();
+      phrasesChanged(true);
+    });
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.append(select(Templates.POSITIONS, p.pos, "pos"), select(Templates.STYLES, p.style, "style"), del);
+    const times = document.createElement("div");
+    times.className = "times";
+    for (const [key, label] of [["from", "desde"], ["to", "hasta"]]) {
+      const input = Object.assign(document.createElement("input"), { type: "number", min: 0, step: 0.1 });
+      input.dataset.key = key;
+      input.addEventListener("input", () => {
+        p[key] = clamp(+input.value / reelLength(), 0, 1);
+        if (key === "to") delete p.extend; // an explicit end
+        phrasesChanged(true);
+      });
+      times.append(Object.assign(document.createElement("span"), { textContent: label }), input);
+    }
+    card.append(role, text, meta, times);
+    card._phrase = p;
+    box.append(card);
+  });
+  syncPhraseTimes();
+}
+
+// Seconds shown for each phrase (they follow the duration).
+function syncPhraseTimes() {
+  const L = reelLength();
+  for (const card of $("phrases").children) {
+    for (const input of card.querySelectorAll("input[type=number]")) {
+      if (input === document.activeElement) continue;
+      input.max = L.toFixed(1);
+      input.value = (card._phrase[input.dataset.key] * L).toFixed(1);
+    }
+  }
+}
+
+$("addPhrase").addEventListener("click", () => {
+  reel.phrases.push({ role: "extra", text: "", from: 0.3, to: 0.6, pos: "middle", style: "subtitle" });
+  renderPhrases();
+  phrasesChanged(true);
+  $("phrases").lastElementChild.querySelector("textarea").focus();
+});
+$("tBrand").addEventListener("input", () => phrasesChanged(false));
 
 // ---------- loading a source ----------
 
@@ -789,6 +919,7 @@ async function loadSource(file) {
     $("testFrame").value = (reel.portion.start + reel.portion.end) / 2; // as the editor: a frame from the middle
   }
   closeLive();
+  applyBase();
   setView("shapes");
   syncFramingInputs();
   refreshUI();
@@ -854,6 +985,7 @@ function onPortion(changed) {
   setPortion(s, e);
   // Choosing the portion by hand sets a free duration.
   reel.duration = { preset: "free", free: Math.round((e - s) * portionFactor() * 10) / 10 };
+  reel.touched.add("duration");
   $("durFree").value = reel.duration.free;
   // Show the frame being chosen.
   setView("original");
@@ -1009,6 +1141,8 @@ function refreshUI() {
   // Template and duration.
   const tpl = Templates.LIST[templateId()];
   $("tplInfo").textContent = has ? tpl.desc : "Subí una fuente para ver los templates.";
+  $("restoreBase").hidden = !has || reel.touched.size === 0;
+  syncPhraseTimes();
   for (const b of $("durPreset").children) b.classList.toggle("on", b.dataset.value === reel.duration.preset);
   $("durFreeBox").hidden = reel.duration.preset !== "free";
   if (reel.kind === "video") {
@@ -1044,7 +1178,14 @@ function refreshUI() {
     else if (has && !$("expStatus").dataset.done) $("expStatus").textContent = `Reel de ${comp.duration.toFixed(1)} s · ${Templates.LIST[comp.id].name} · 1080×1920, 30 fps.`;
   }
   $("viewMode").querySelector('[data-value="reel"]').disabled = !comp;
-  if (view === "reel" && !comp) setView("shapes");
+  // While the shapes are found again the reel can't show: back to it when ready.
+  if (view === "reel" && !comp) {
+    setView("shapes");
+    reel.backToReel = true;
+  } else if (reel.backToReel && comp && view === "shapes") {
+    reel.backToReel = false;
+    setView("reel");
+  }
   if (!reel.generating && reel.kind === "video") {
     if (stale()) $("genStatus").innerHTML = '<span class="stale">Cambiaste el encuadre, el tramo o los ajustes: calculá el video de nuevo para ver el reel.</span>';
     else if (!reel.gen) $("genStatus").textContent = "Cuando te guste cómo queda en los frames de prueba, calculá el video.";
@@ -1101,7 +1242,9 @@ function reelMeta(comp, res, seconds) {
     framing: { ...reel.framing }, crop: crop(),
     shapes: params(),
     animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
-    texts: texts(),
+    base: reel.base, changedByHand: [...reel.touched],
+    phrases: reel.phrases.filter((p) => p.text.trim()).map(({ role, text, from, to, pos, style }) => ({ role, text, from, to, pos, style })),
+    brand: $("tBrand").value,
     audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
     export: { width: res.width, height: res.height, fps: 30, codec: res.codec, seconds: Math.round(seconds * 10) / 10 },
   };
