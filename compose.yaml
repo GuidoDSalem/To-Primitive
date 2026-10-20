@@ -4,8 +4,14 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    environment:
+      # Only to show it on the publishing page.
+      PUBLISH_HOST_DIR: "${PUBLISH_HOST_DIR:-./publicar}"
     volumes:
       - reels:/reels
+      # The folder the publisher takes videos from (set PUBLISH_HOST_DIR in
+      # .env, see .env.example); published ones move to publicados/ inside.
+      - "${PUBLISH_HOST_DIR:-./publicar}:/publicar"
 
 volumes:
   reels:

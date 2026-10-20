@@ -1533,7 +1533,19 @@ async function loadLibrary() {
       await api(`/api/reels/${e.id}`, { method: "DELETE" }).catch((err) => alert(err.message));
       loadLibrary();
     });
-    actions.append(dl, del);
+    const queue = Object.assign(document.createElement("button"), { type: "button", textContent: "A la cola", title: "Copiarlo a la carpeta de publicación" });
+    queue.addEventListener("click", async () => {
+      queue.disabled = true;
+      try {
+        const r = await api(`/api/reels/${e.id}/queue`, { method: "POST" });
+        queue.textContent = "En la cola ✓";
+        queue.title = r.name;
+      } catch (err) {
+        queue.disabled = false;
+        alert("No se pudo: " + err.message);
+      }
+    });
+    actions.append(queue, dl, del);
     row.append(v, info, actions);
     box.append(row);
   }

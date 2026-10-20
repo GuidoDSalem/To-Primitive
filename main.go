@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -51,6 +52,7 @@ var numWorkers = runtime.NumCPU()
 type server struct {
 	dataDir string
 	lib     *library
+	pub     *publisher // nil: publishing not configured
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -62,6 +64,7 @@ func main() {
 	addr := flag.String("addr", envOr("ADDR", ":8080"), "listen address")
 	dataDir := flag.String("data", envOr("DATA_DIR", filepath.Join(os.TempDir(), "to-primitive")), "directory for uploaded videos")
 	reelsDir := flag.String("reels", envOr("REELS_DIR", "reels"), "directory where finished reels are kept")
+	publishDir := flag.String("publish", envOr("PUBLISH_DIR", "publicar"), "folder of videos waiting to be published")
 	flag.Parse()
 
 	// Videos don't survive a restart (sessions live in memory), so start clean.
@@ -75,7 +78,13 @@ func main() {
 	}
 
 	srv := newServer(*dataDir, *reelsDir)
-	log.Printf("To-Primitive listening on %s (reels in %s)", *addr, *reelsDir)
+	pub, err := newPublisher(*publishDir, simulatedUploader{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	srv.pub = pub
+	go pub.Run(context.Background(), 30*time.Second)
+	log.Printf("To-Primitive listening on %s (reels in %s, publishing from %s)", *addr, *reelsDir, *publishDir)
 	log.Fatal(http.ListenAndServe(*addr, srv.routes()))
 }
 
@@ -114,6 +123,17 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/reels", srv.reelList)
 	mux.HandleFunc("GET /api/reels/{id}/video", srv.reelVideo)
 	mux.HandleFunc("DELETE /api/reels/{id}", srv.reelDelete)
+	mux.HandleFunc("POST /api/reels/{id}/queue", srv.withPublisher(srv.reelQueue))
+
+	mux.HandleFunc("GET /api/publish", srv.withPublisher(srv.pubOverview))
+	mux.HandleFunc("PUT /api/publish/settings", srv.withPublisher(srv.pubSettings))
+	mux.HandleFunc("PUT /api/publish/order", srv.withPublisher(srv.pubOrder))
+	mux.HandleFunc("PUT /api/publish/queue/{name}/meta", srv.withPublisher(srv.pubMeta))
+	mux.HandleFunc("POST /api/publish/queue/{name}/skip", srv.withPublisher(srv.pubSkip))
+	mux.HandleFunc("POST /api/publish/queue/{name}/now", srv.withPublisher(srv.pubNow))
+	mux.HandleFunc("GET /api/publish/queue/{name}/video", srv.withPublisher(srv.pubVideo(false)))
+	mux.HandleFunc("POST /api/publish/published/{name}/requeue", srv.withPublisher(srv.pubRequeue))
+	mux.HandleFunc("GET /api/publish/published/{name}/video", srv.withPublisher(srv.pubVideo(true)))
 	return mux
 }
 

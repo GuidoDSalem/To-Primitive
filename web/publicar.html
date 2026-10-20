@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive · Publicar</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="publicar.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Publicar</h1>
+      <p class="sub">Cola de videos y regla de publicación · <a href="reels.html">editor de reels</a> · <a href="/">editor</a></p>
+    </header>
+
+    <section>
+      <h2>Regla</h2>
+      <label class="check big"><input id="enabled" type="checkbox"> Publicar automáticamente</label>
+      <div class="field" style="margin-top:12px">
+        <label>Horarios</label>
+        <div id="times" class="times"></div>
+        <button id="addTime" type="button">＋ Agregar horario</button>
+      </div>
+      <div class="field">
+        <label>Días</label>
+        <div id="days" class="chips">
+          <button type="button" data-value="1">Lu</button>
+          <button type="button" data-value="2">Ma</button>
+          <button type="button" data-value="3">Mi</button>
+          <button type="button" data-value="4">Ju</button>
+          <button type="button" data-value="5">Vi</button>
+          <button type="button" data-value="6">Sá</button>
+          <button type="button" data-value="0">Do</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="tz">Zona horaria</label>
+        <select id="tz"></select>
+      </div>
+      <button id="saveRule" class="wide primary">Guardar regla</button>
+      <p id="ruleStatus" class="hint"></p>
+    </section>
+
+    <section>
+      <h2>Carpeta</h2>
+      <p class="hint">Dejá los videos (MP4, MOV, M4V o WebM) en la carpeta de publicación: forman la cola, del más viejo al más nuevo salvo que los reordenes. Cada uno puede tener al lado un <code>.json</code> con el mismo nombre (título, descripción, etiquetas); al publicarse pasan a <code>publicados/</code>.</p>
+      <p id="dirInfo" class="hint"></p>
+      <p id="uploaderInfo" class="hint"></p>
+    </section>
+
+    <section>
+      <h2>Registro</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+  </aside>
+
+  <main id="stage" class="pub-stage">
+    <div class="pub-head">
+      <h2>Cola <span id="queueCount" class="count"></span></h2>
+      <button id="refresh" type="button">Actualizar</button>
+    </div>
+    <p id="nextInfo" class="next"></p>
+    <div id="queue" class="items"></div>
+
+    <h2 style="margin-top:28px">Publicados <span id="pubCount" class="count"></span></h2>
+    <div id="published" class="items"></div>
+  </main>
+
+  <script src="publicar.js"></script>
+</body>
+</html>

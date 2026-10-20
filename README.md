@@ -184,6 +184,34 @@ La vista previa reproduce el reel o el original. Si cambiás el encuadre, la por
 
 Próximas etapas: una cola de publicación con una regla configurable (por ejemplo, un reel por día a cierta hora) y la publicación automática.
 
+
+## Publicar
+
+`/publicar.html` (enlace "publicar" arriba de los editores) maneja la cola de publicación.
+
+**La carpeta.** Los videos que dejes en la carpeta de publicación (MP4, MOV, M4V o WebM) forman la cola: del más viejo al más nuevo, salvo que los reordenes. Cada uno puede tener al lado un `.json` con el mismo nombre:
+
+```json
+{ "title": "La Mona Lisa con 150 triángulos", "description": "¿Cuál hago mañana? #Shorts", "tags": ["arte", "lowpoly"] }
+```
+
+Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`. Desde la página se pueden editar (se guardan en ese JSON). Al publicarse, el video y su JSON pasan a `publicados/`, con la fecha y el resultado. La página avisa si un video no sirve como Short (horizontal o de más de 60 s).
+
+El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el título sale de la frase de título (o de la pregunta) con `{formas}` y `{tipo}` completados, y la descripción del cierre más `#Shorts`.
+
+**La regla.** Horarios (uno o varios por día), días de la semana y zona horaria (por defecto Buenos Aires); por ejemplo, "todos los días a las 19:00". En cada horario se publica el siguiente video de la cola. Los videos se pueden subir o bajar, **saltear** (quedan en la carpeta sin publicarse), **publicar ahora** y, ya publicados, **volver a la cola**. Si el servidor estuvo apagado durante varios horarios, al volver publica uno solo (no una ráfaga). La regla, el orden y el registro se guardan en la propia carpeta (`.cola.json`).
+
+**Por ahora la publicación es simulada:** marca el video y lo mueve a `publicados/`, sin subirlo a ninguna plataforma. Así se prueban la cola y la regla; la subida a YouTube (y después TikTok e Instagram) se conecta en el mismo lugar.
+
+**Con Docker**, la carpeta de tu computadora se monta en `/publicar`. Copiá `.env.example` a `.env` y poné ahí la ruta:
+
+```sh
+cp .env.example .env   # PUBLISH_HOST_DIR=/Users/.../Reels
+docker compose up --build
+```
+
+Sin Docker: `-publish <carpeta>` o `PUBLISH_DIR` (por defecto `./publicar`).
+
 ## Video
 
 1. **Subí un video.** Se abre el editor sobre un frame de la mitad.
@@ -308,6 +336,14 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/reels` | Lista la biblioteca, del más nuevo al más viejo |
 | `GET /api/reels/{id}/video` | El MP4 de un reel (`?download=1` para descargarlo) |
 | `DELETE /api/reels/{id}` | Borra un reel de la biblioteca |
+| `POST /api/reels/{id}/queue` | Copia un reel de la biblioteca a la carpeta de publicación (con título y descripción) |
+| `GET /api/publish` | Regla, cola (con el horario de cada video), publicados y registro |
+| `PUT /api/publish/settings` | La regla: `enabled`, `times` (HH:MM), `days` (0 = domingo), `tz` |
+| `PUT /api/publish/order` | Orden preferido de la cola (`names`) |
+| `PUT /api/publish/queue/{name}/meta` | Título, descripción y etiquetas (en el JSON del video) |
+| `POST /api/publish/queue/{name}/skip` | Saltear o incluir (`skip`) |
+| `POST /api/publish/queue/{name}/now` | Publicar ya |
+| `POST /api/publish/published/{name}/requeue` | Devolver un publicado a la cola (primero) |
 
 La biblioteca de reels vive en `REELS_DIR` (o `-reels`), por defecto `./reels`. A diferencia de los archivos subidos, no se borra al reiniciar. En Docker es el volumen `reels` (montado en `/reels`).
 
