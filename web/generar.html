@@ -53,6 +53,7 @@
     <section>
       <h2>Carpetas</h2>
       <p id="inInfo" class="hint"></p>
+      <p class="hint">También podés dejar archivos directamente en esa carpeta.</p>
       <p id="outInfo" class="hint"></p>
       <p id="browserInfo" class="hint"></p>
     </section>
@@ -65,10 +66,19 @@
 
   <main id="stage" class="pub-stage">
     <div class="pub-head">
-      <h2>Trabajos <span id="jobCount" class="count"></span></h2>
+      <h2>Subir fotos o videos</h2>
       <button id="refresh" type="button">Actualizar</button>
     </div>
-    <div id="jobs" class="jobs"></div>
+    <div id="dropzone" class="dropzone">
+      <p><strong>Arrastrá fotos o videos acá</strong></p>
+      <p class="hint">Se guardan en la carpeta de entrada y empiezan a generarse sus versiones.</p>
+      <button id="pick" type="button" class="primary">Elegir archivos…</button>
+      <input id="files" type="file" accept="image/*,video/*" multiple hidden>
+    </div>
+    <p id="paused" class="warn-line" hidden>El generador está pausado: lo que subas queda en la entrada, pero no se genera hasta activarlo. <button id="enableNow" type="button">Activar</button></p>
+
+    <h2 style="margin-top:22px">En proceso <span id="jobCount" class="count"></span></h2>
+    <div id="sources" class="jobs"></div>
 
     <h2 style="margin-top:28px">Generados <span id="outCount" class="count"></span></h2>
     <p class="next"><span id="outSummary"></span> <a class="button" href="revisar.html">Revisar →</a></p>

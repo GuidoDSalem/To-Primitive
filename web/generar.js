@@ -1,8 +1,7 @@
 "use strict";
 
-// Generator page: settings (on/off, which templates), the jobs (one per
-// source and template) and the reels generated, which can go to the
-// publishing queue.
+// Generator page: settings (on/off, which templates, languages), uploading
+// photos and videos to the input folder, and how far each source got.
 
 const $ = (id) => document.getElementById(id);
 let view = null;
@@ -82,24 +81,122 @@ function button(text, title, onClick) {
   return b;
 }
 
-const STATES = { queued: "En espera", running: "Generando", done: "Listo", error: "Falló" };
+// ---------- uploads ----------
 
-function jobRow(j) {
+const uploads = []; // { name, fraction, error } while uploading
+
+function upload(file) {
+  const u = { name: file.name, fraction: 0, error: null };
+  uploads.push(u);
+  drawSources();
+  return new Promise((resolve) => {
+    const form = new FormData();
+    form.append("file", file);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/auto/inputs");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) u.fraction = e.loaded / e.total;
+      drawSources();
+    };
+    xhr.onload = async () => {
+      if (xhr.status === 200) uploads.splice(uploads.indexOf(u), 1);
+      else u.error = xhr.responseText || xhr.statusText;
+      await refresh();
+      resolve();
+    };
+    xhr.onerror = () => {
+      u.error = "no se pudo subir";
+      drawSources();
+      resolve();
+    };
+    xhr.send(form);
+  });
+}
+
+async function uploadAll(files) {
+  const list = [...files].filter((f) => /^(image|video)\//.test(f.type) || /\.(jpe?g|png|webp|gif|mp4|mov|m4v|webm|mkv|avi)$/i.test(f.name));
+  if (list.length < files.length) alert("Solo se suben fotos y videos.");
+  for (const f of list) await upload(f); // one at a time: the first starts generating sooner
+}
+
+$("pick").addEventListener("click", () => $("files").click());
+$("files").addEventListener("change", (e) => {
+  uploadAll(e.target.files);
+  e.target.value = "";
+});
+const stage = $("stage");
+stage.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  stage.classList.add("dragging");
+});
+stage.addEventListener("dragleave", (e) => {
+  if (!stage.contains(e.relatedTarget)) stage.classList.remove("dragging");
+});
+stage.addEventListener("drop", (e) => {
+  e.preventDefault();
+  stage.classList.remove("dragging");
+  uploadAll(e.dataTransfer.files);
+});
+$("enableNow").addEventListener("click", () => act(api("/api/auto/settings", { method: "PUT", json: { ...view.settings, enabled: true } })));
+
+// ---------- sources in progress ----------
+
+// One line per source: how many of its versions are ready, the one being
+// made, and the failed ones (to retry).
+function sourceRow(src, jobs) {
   const row = document.createElement("div");
-  row.className = "job " + j.state;
+  const done = jobs.filter((j) => j.state === "done").length;
+  const failed = jobs.filter((j) => j.state === "error");
+  const running = jobs.find((j) => j.state === "running");
+  const finished = done + failed.length === jobs.length;
+  row.className = "job " + (running ? "running" : failed.length ? "error" : finished ? "done" : "queued");
   const what = Object.assign(document.createElement("div"), { className: "what" });
-  what.append(Object.assign(document.createElement("strong"), { textContent: j.source }), ` · ${name(j.template)} · ${(j.lang || "es").toUpperCase()}`);
+  what.append(Object.assign(document.createElement("strong"), { textContent: src }));
+  if (running) what.append(" ", Object.assign(document.createElement("small"), { textContent: `· ${name(running.template)} · ${(running.lang || "es").toUpperCase()}${running.stage ? " · " + running.stage : ""}` }));
   const state = Object.assign(document.createElement("div"), { className: "state" });
-  state.textContent = STATES[j.state] + (j.state === "running" && j.stage ? ` · ${j.stage}` : "") + (j.state === "done" && j.output ? ` → ${j.output}` : "");
+  state.textContent = finished && !failed.length ? `${done} versiones listas` : `${done} de ${jobs.length} listas` + (failed.length ? ` · ${failed.length} fallaron` : "");
   row.append(what, state);
-  if (j.state === "running") {
-    row.append(Object.assign(document.createElement("progress"), { max: 1, value: j.progress || 0 }));
+  if (!finished) {
+    row.append(Object.assign(document.createElement("progress"), { max: 1, value: (done + (running?.progress || 0)) / jobs.length }));
   }
-  if (j.state === "error") {
-    row.append(Object.assign(document.createElement("div"), { className: "err", textContent: j.error }));
-    row.append(button("Reintentar", "Vuelve a la cola", () => act(api(`/api/auto/jobs/${j.id}/retry`, { method: "POST" }))));
+  if (failed.length) {
+    row.append(Object.assign(document.createElement("div"), { className: "err", textContent: failed[0].error }));
+    row.append(button("Reintentar", "Vuelven a la cola las que fallaron", () =>
+      act(Promise.all(failed.map((j) => api(`/api/auto/jobs/${j.id}/retry`, { method: "POST" }))).then(() => null))));
   }
   return row;
+}
+
+function uploadRow(u) {
+  const row = document.createElement("div");
+  row.className = "job " + (u.error ? "error" : "running");
+  row.append(Object.assign(document.createElement("div"), { className: "what", textContent: u.name }),
+    Object.assign(document.createElement("div"), { className: "state", textContent: u.error ? "No se subió" : `Subiendo ${Math.round(u.fraction * 100)} %` }));
+  if (u.error) {
+    row.append(Object.assign(document.createElement("div"), { className: "err", textContent: u.error }));
+    row.append(button("Quitar", "", () => {
+      uploads.splice(uploads.indexOf(u), 1);
+      drawSources();
+    }));
+  } else {
+    row.append(Object.assign(document.createElement("progress"), { max: 1, value: u.fraction }));
+  }
+  return row;
+}
+
+function drawSources() {
+  // Jobs come newest first; the copies to other languages live in Publicar.
+  const by = new Map();
+  for (const j of view?.jobs ?? []) {
+    if (j.dest === "queue") continue;
+    if (!by.has(j.source)) by.set(j.source, []);
+    by.get(j.source).push(j);
+  }
+  const rows = [...by].slice(0, 12).map(([src, jobs]) => sourceRow(src, jobs));
+  $("sources").replaceChildren(...uploads.map(uploadRow), ...rows);
+  if (!uploads.length && !rows.length) $("sources").append(Object.assign(document.createElement("p"), { className: "none-yet", textContent: "Nada todavía: subí fotos o videos." }));
+  const active = (view?.jobs ?? []).filter((j) => j.dest !== "queue" && (j.state === "queued" || j.state === "running")).length;
+  $("jobCount").textContent = active ? `${active} versiones pendientes` : "";
 }
 
 function show(o, settingsToo = false) {
@@ -109,9 +206,8 @@ function show(o, settingsToo = false) {
   $("outInfo").textContent = `Generados: ${o.out}`;
   $("writerInfo").textContent = `Escribe: ${o.writer}.` + (o.settings.llm.provider === "anthropic" && !o.hasClaudeKey ? " ⚠ Falta ANTHROPIC_API_KEY en el .env: se van a usar las reglas." : "");
   $("browserInfo").textContent = o.browser ? "Navegador: " + o.browser.split("/").pop() : "⚠ No hay navegador para generar: instalá Chromium o definí CHROME_BIN.";
-  const active = o.jobs.filter((j) => j.state === "queued" || j.state === "running").length;
-  $("jobCount").textContent = active ? `${active} pendientes` : "";
-  $("jobs").replaceChildren(...(o.jobs.length ? o.jobs.slice(0, 60).map(jobRow) : [Object.assign(document.createElement("p"), { className: "none-yet", textContent: "Dejá fotos o videos en la carpeta de entrada." })]));
+  $("paused").hidden = o.settings.enabled;
+  drawSources();
   $("outCount").textContent = o.outputs.length;
   $("outSummary").textContent = o.outputs.length
     ? `${o.outputs.length} versiones esperan revisión: elegí una por idioma, refinala y mandala a la cola.`
@@ -128,7 +224,7 @@ async function refresh() {
   try {
     show(await api("/api/auto"));
   } catch (e) {
-    $("jobs").textContent = "No se pudo leer el generador: " + e.message;
+    $("sources").textContent = "No se pudo leer el generador: " + e.message;
   }
 }
 $("refresh").addEventListener("click", refresh);

@@ -190,7 +190,8 @@ Próximas etapas: una cola de publicación con una regla configurable (por ejemp
 
 `/generar.html` (enlace "generar" arriba de los editores). Cada foto o video que dejes en la **carpeta de entrada** se convierte sola en varios reels, **uno por template** (los que correspondan: algunos son solo para fotos o solo para videos), con la configuración base de cada uno. Los reels van a la **carpeta de generados**, cada uno con su JSON (título y descripción sacados de sus frases, más el registro de cómo se hizo), aparte de la carpeta de publicación. Cuando están todas las versiones, la fuente pasa a `procesados/` dentro de la entrada.
 
-- En la página se elige qué templates generar y se puede pausar. Muestra cada trabajo con su avance y los errores (con **Reintentar**); los reels generados se revisan en **Revisar** (ver abajo).
+- **Subir desde la página:** arrastrá fotos o videos a la página (o usá **Elegir archivos…**, se pueden varios a la vez). Se guardan en la carpeta de entrada y sus versiones entran a generarse en el momento. Si el nombre ya se usó (en la entrada o en `procesados/`), se guarda como `nombre (2).png`. Dejarlos directamente en la carpeta sigue funcionando igual.
+- En la página se elige qué templates generar y se puede pausar (si está pausado, lo que subas espera y la página ofrece **Activar**). **En proceso** muestra una línea por fuente: cuántas versiones están listas, cuál se está haciendo y las que fallaron (con **Reintentar**). Los reels generados se revisan en **Revisar** (ver abajo).
 - Las fuentes se toman cuando terminan de copiarse (el tamaño deja de cambiar) y se procesan de a una. Si el servidor se reinicia, lo que estaba a medio hacer vuelve a la cola.
 - **Cómo funciona:** para que los reels salgan idénticos a los del editor, el servidor abre el mismo editor de reels en un **Chromium sin pantalla** (`reels.html?auto=<trabajo>`). Esa página carga la fuente, elige el template con su base, espera las formas (o calcula el video), exporta y devuelve el MP4. Si el navegador no puede reproducir el video (Chromium sin H.264), el servidor le da una copia en WebM. La imagen de Docker trae Chromium y las fuentes (con emoji). Sin Docker hace falta tener Chromium o Chrome instalado (`CHROME_BIN` para indicar cuál).
 - Cada reel tarda aproximadamente 1 minuto (30 s a 1 min con 150 formas; más con Mosaico, de 500, o con ¿Cuál preferís?, que calcula cuatro tipos de forma).
@@ -389,6 +390,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/publish/queue/{name}/spec` | Ajustes, fuente y otros idiomas en la cola, para reabrirlo en el editor (`reels.html?edit=`) |
 | `GET /api/publish/queue/{name}/source` | La foto o video de origen |
 | `GET /api/auto` | Generador: ajustes, trabajos, reels generados y registro |
+| `POST /api/auto/inputs` | Sube fotos o videos (campo `file`, uno o varios) a la carpeta de entrada y encola sus versiones; responde los nombres con que quedaron |
 | `PUT /api/auto/settings` | `enabled`, `templates` (vacío = todos), `languages` y `llm` (`provider`: `anthropic`, `local`, `none` o vacío = automático; `model`; `baseURL`) |
 | `GET /api/auto/jobs/{id}` · `/source` | Lo que la página automática necesita: template y fuente (`?compat` = video en WebM) |
 | `POST /api/auto/jobs/{id}/progress` · `/fail` · `/retry` | Avance, error y reintento de un trabajo |

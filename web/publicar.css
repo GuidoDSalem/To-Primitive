@@ -117,3 +117,12 @@ code { font-size: 11px; color: var(--accent); }
 .shorts-caption .cap-desc { opacity: .85; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .v-desc.warn { color: #f2b45c; }
 .item .dup select { width: 100%; }
+
+/* Generator page: uploading sources. */
+.dropzone { border: 2px dashed var(--line); border-radius: 12px; padding: 28px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.dropzone p { margin: 0; }
+.dropzone button { margin-top: 8px; }
+#stage.dragging .dropzone, .dropzone.dragging { border-color: var(--accent); background: #6aa8ff14; }
+.warn-line { color: #f2b45c; font-size: 13px; }
+.warn-line button { font-size: 12px; padding: 3px 8px; margin-left: 6px; }
+.job .what small { color: var(--muted); }

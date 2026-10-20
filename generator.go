@@ -231,16 +231,21 @@ func (g *generator) scan() {
 		if !g.state.Settings.Enabled {
 			continue
 		}
-		tpls, langs := g.templatesFor(kind), g.state.Settings.langs()
-		for _, t := range tpls {
-			for _, l := range langs {
-				g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, Lang: l, State: "queued", Created: g.now()})
-			}
-		}
-		g.logLocked(name, "fuente nueva", fmt.Sprintf("%d versiones: %s × %s", len(tpls)*len(langs), strings.Join(tpls, ", "), strings.Join(langs, ", ")))
+		g.enqueueLocked(name, kind, "fuente nueva")
 	}
 	g.seen = seen
 	g.saveLocked()
+}
+
+// enqueueLocked queues a job per template and language for a new source.
+func (g *generator) enqueueLocked(name, kind, why string) {
+	tpls, langs := g.templatesFor(kind), g.state.Settings.langs()
+	for _, t := range tpls {
+		for _, l := range langs {
+			g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, Lang: l, State: "queued", Created: g.now()})
+		}
+	}
+	g.logLocked(name, why, fmt.Sprintf("%d versiones: %s × %s", len(tpls)*len(langs), strings.Join(tpls, ", "), strings.Join(langs, ", ")))
 }
 
 func (g *generator) sourceExistsLocked(name string) bool {
