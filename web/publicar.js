@@ -170,8 +170,11 @@ function itemCard(it, i, published) {
       row,
       button(it.skipped ? "Incluir" : "Saltear", it.skipped ? "Vuelve a la cola" : "Queda en la carpeta sin publicarse",
         () => act(api(`/api/publish/queue/${enc(it.name)}/skip`, { method: "POST", json: { skip: !it.skipped } }))),
-      button("Editar", "Título, descripción y etiquetas", () => toggleEdit(card, it)),
-      button("Duplicar en otro idioma", "Traduce los textos con el modelo local y vuelve a generar el reel", () => toggleDuplicate(card, it)),
+      ...(it.editable ? [
+        Object.assign(document.createElement("a"), { className: "button", href: `reels.html?edit=${enc(it.name)}`, textContent: "Editar reel", title: "Vuelve al editor con todos sus ajustes (en todos sus idiomas de la cola)" }),
+      ] : []),
+      button("Textos", "Título, descripción y etiquetas", () => toggleEdit(card, it)),
+      ...(it.editable ? [button("Duplicar en otro idioma", "Traduce los textos con el modelo local y vuelve a generar el reel", () => toggleDuplicate(card, it))] : []),
       button("Publicar ahora", "Sin esperar la regla", () => {
         if (confirm(`¿Publicar "${it.title}" ahora?`)) act(api(`/api/publish/queue/${enc(it.name)}/now`, { method: "POST" }));
       }),

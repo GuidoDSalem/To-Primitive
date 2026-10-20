@@ -152,6 +152,8 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/publish/queue/{name}/video", srv.withPublisher(srv.pubVideo(false)))
 	mux.HandleFunc("POST /api/publish/published/{name}/requeue", srv.withPublisher(srv.pubRequeue))
 	mux.HandleFunc("POST /api/publish/queue/{name}/duplicate", srv.withPublisher(srv.pubDuplicate))
+	mux.HandleFunc("GET /api/publish/queue/{name}/spec", srv.withPublisher(srv.pubSpec))
+	mux.HandleFunc("GET /api/publish/queue/{name}/source", srv.withPublisher(srv.pubSource))
 	mux.HandleFunc("GET /api/publish/copies", srv.withPublisher(srv.pubCopies))
 	mux.HandleFunc("GET /api/publish/published/{name}/video", srv.withPublisher(srv.pubVideo(true)))
 

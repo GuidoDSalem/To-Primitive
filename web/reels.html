@@ -14,12 +14,12 @@
       <h1>Editor de reels</h1>
       <p class="sub">Foto o video → reel vertical listo para publicar · <a href="/">ir al editor</a> · <a href="generar.html">generar</a> · <a href="revisar.html">revisar</a> · <a href="publicar.html">publicar</a></p>
       <div id="refineBar" class="refine-bar" hidden>
-        Refinando <strong id="refineName"></strong>
+        <span id="refineVerb">Refinando</span> <strong id="refineName"></strong>
         <span id="refineState" class="hint"></span>
         <div id="refineLangs" class="chips"></div>
         <span class="hint">Los cambios valen para todos los idiomas; las frases se escriben en cada uno (cambiá de idioma para verlas y editarlas).</span>
-        <label class="check"><input id="refineQueue" type="checkbox" checked> Al guardar, mandar todos los idiomas a la cola</label>
-        <a href="revisar.html">← volver a Revisar</a>
+        <label id="refineQueueBox" class="check"><input id="refineQueue" type="checkbox" checked> Al guardar, mandar todos los idiomas a la cola</label>
+        <a id="refineBack" href="revisar.html">← volver a Revisar</a>
       </div>
     </header>
 

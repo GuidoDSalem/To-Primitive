@@ -1575,8 +1575,12 @@ loadLibrary();
 
 // reels.html?refine=<name>: a version from the generator, reopened with all
 // its settings to adjust them by hand and save it again over itself.
-const REFINE = new URLSearchParams(location.search).get("refine");
-const exportLabel = () => (REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
+// reels.html?edit=<name>: the same, for a reel already in the publishing
+// queue; saving replaces it there (in every queued language).
+const EDIT = new URLSearchParams(location.search).get("edit");
+const REFINE = EDIT || new URLSearchParams(location.search).get("refine");
+const reelAPI = (name) => (EDIT ? "/api/publish/queue/" : "/api/review/") + encodeURIComponent(name);
+const exportLabel = () => (EDIT ? "Guardar cambios en la cola" : REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
 
 // Load a source from a URL into the editor (a WebM copy if this browser
 // can't play the video).
@@ -1690,7 +1694,7 @@ async function saveRefined(signal) {
       switchLang(v.lang);
       const comp = composition();
       if (!comp) throw new Error("el reel no está listo");
-      await encodeAndSend(comp, { refine: v.name }, signal, (f, text) =>
+      await encodeAndSend(comp, EDIT ? { queue: v.name } : { refine: v.name }, signal, (f, text) =>
         setExport((saved.length + f) / refining.versions.length, `${v.lang.toUpperCase()} (${saved.length + 1} de ${refining.versions.length}): ${text}`));
       saved.push(v);
     }
@@ -1698,6 +1702,10 @@ async function saveRefined(signal) {
     switchLang(start);
   }
   let msg = `Guardado en ${saved.map((v) => v.lang.toUpperCase()).join(", ")}`;
+  if (EDIT) {
+    $("refineState").textContent = "· guardado en la cola ✓";
+    return msg + ", en su lugar de la cola";
+  }
   if ($("refineQueue").checked) {
     const queued = [];
     for (const v of saved) {
@@ -1721,11 +1729,17 @@ async function saveRefined(signal) {
 async function runRefine(name) {
   $("refineBar").hidden = false;
   $("refineName").textContent = name;
+  if (EDIT) {
+    $("refineVerb").textContent = "Editando (en la cola)";
+    $("refineQueueBox").hidden = true;
+    $("refineBack").textContent = "← volver a Publicar";
+    $("refineBack").href = "publicar.html";
+  }
   $("export").textContent = exportLabel();
   try {
-    const spec = await api(`/api/review/${encodeURIComponent(name)}/spec`);
+    const spec = await api(`${reelAPI(name)}/spec`);
     $("refineState").textContent = `· ${(spec.lang || "").toUpperCase()} · ${Templates.LIST[spec.template]?.name ?? spec.template}`;
-    const src = `/api/review/${encodeURIComponent(name)}/source`;
+    const src = `${reelAPI(name)}/source`;
     await loadFromURL(src, spec.source.name, spec.source.type, spec.source.kind, null);
     restoreRecord(spec.settings || {});
     // The other languages of the same reel.

@@ -164,6 +164,7 @@ type PubItem struct {
 	PublishedAt *time.Time `json:"publishedAt,omitempty"`
 	Result      string     `json:"result,omitempty"`
 	Brand       string     `json:"brand,omitempty"` // the reel's brand (its record), e.g. @account
+	Editable    bool       `json:"editable,omitempty"` // has its settings and source: it can reopen in the reel editor
 	Warnings    []string   `json:"warnings,omitempty"`
 }
 
@@ -285,6 +286,8 @@ func (p *publisher) item(path string, fi os.FileInfo) PubItem {
 	if s, ok := m["settings"].(map[string]any); ok {
 		it.Brand, _ = s["brand"].(string)
 		it.Brand = strings.TrimSpace(it.Brand)
+		src, _ := m["source"].(string)
+		it.Editable = validSourceName(src)
 	}
 
 	// What would keep it from being a Short.

@@ -230,9 +230,11 @@ La etapa de cada versión (generada, elegida, refinada) se guarda en su JSON (`"
 { "title": "La Mona Lisa con 150 triángulos", "description": "¿Cuál hago mañana? #Shorts", "tags": ["arte", "lowpoly"] }
 ```
 
-Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`. Desde la página se pueden editar (se guardan en ese JSON). Al publicarse, el video y su JSON pasan a `publicados/`, con la fecha y el resultado. La página avisa si un video no sirve como Short (horizontal o de más de 60 s). Un clic en un video (de la cola o de los publicados) abre la **vista previa de lo que se va a publicar**: el reel grande, con sonido, y al costado título, descripción, tags, cuándo sale y los avisos; por defecto se ve **como en Shorts**, con el nombre del canal (la marca del reel), el título y la primera línea de la descripción encima del video (se puede quitar). ← → recorre la cola, Esc cierra.
+Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`. Desde la página se pueden editar con **Textos** (se guardan en ese JSON). Al publicarse, el video y su JSON pasan a `publicados/`, con la fecha y el resultado. La página avisa si un video no sirve como Short (horizontal o de más de 60 s). Un clic en un video (de la cola o de los publicados) abre la **vista previa de lo que se va a publicar**: el reel grande, con sonido, y al costado título, descripción, tags, cuándo sale y los avisos; por defecto se ve **como en Shorts**, con el nombre del canal (la marca del reel), el título y la primera línea de la descripción encima del video (se puede quitar). ← → recorre la cola, Esc cierra.
 
 El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el título sale de la frase de título (o de la pregunta) con `{formas}` y `{tipo}` completados, y la descripción del cierre más `#Shorts`.
+
+**Editar reel.** Cada reel de la cola que salió del generador (o de Revisar) se puede volver a abrir en el editor de reels con **Editar reel**, con todos sus ajustes y con sus otros idiomas que estén en la cola (mismo origen y template). Igual que al refinar, los cambios valen para todos los idiomas y las frases se editan en cada uno. **Guardar cambios en la cola** vuelve a exportar todos los idiomas y los reemplaza en su mismo lugar de la cola, sin tocar título, descripción ni tags (esos se cambian con **Textos**).
 
 **Duplicar en otro idioma.** Cada reel de la cola que salió del generador tiene **Duplicar en otro idioma**: elegís el idioma (es, en, pt, fr, it, de u otro código) y un **LLM local** traduce todos los textos —título, descripción, tags y cada frase que aparece en pantalla—, manteniendo `{formas}`, `{tipo}`, los emojis y `#Shorts`. Después se vuelve a renderizar el reel con los mismos ajustes (Chromium en el contenedor) y la copia entra a la cola justo después del original, ya refinada. El avance se ve en "Duplicando en otros idiomas", con **Reintentar** si falla. Usa siempre el modelo local (el de la página Generar, o `LLM_BASE_URL` / `LLM_MODEL`), nunca Claude. No se puede duplicar a un idioma que ya está en la cola, ni un video que no tenga sus ajustes (por ejemplo, uno dejado a mano en la carpeta).
 
@@ -383,12 +385,15 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/publish/published/{name}/requeue` | Devolver un publicado a la cola (primero) |
 | `POST /api/publish/queue/{name}/duplicate` | Duplicar en otro idioma (`lang`): traduce con el LLM local y renderiza la copia |
 | `GET /api/publish/copies` | Copias en curso (estado, progreso, error) |
+| `GET /api/publish/queue/{name}/spec` | Ajustes, fuente y otros idiomas en la cola, para reabrirlo en el editor (`reels.html?edit=`) |
+| `GET /api/publish/queue/{name}/source` | La foto o video de origen |
 | `GET /api/auto` | Generador: ajustes, trabajos, reels generados y registro |
 | `PUT /api/auto/settings` | `enabled`, `templates` (vacío = todos), `languages` y `llm` (`provider`: `anthropic`, `local`, `none` o vacío = automático; `model`; `baseURL`) |
 | `GET /api/auto/jobs/{id}` · `/source` | Lo que la página automática necesita: template y fuente (`?compat` = video en WebM) |
 | `POST /api/auto/jobs/{id}/progress` · `/fail` · `/retry` | Avance, error y reintento de un trabajo |
 | `GET /api/auto/outputs/{name}/video` · `POST …/queue` · `DELETE` | Ver, mandar a la cola de publicación o borrar un reel generado |
 | `POST /api/reels/mux` con `job` | El reel terminado de un trabajo (va a la carpeta de generados) |
+| `POST /api/reels/mux` con `queue` | Un reel de la cola editado de nuevo: lo reemplaza en su lugar (con sus nuevos ajustes) |
 | `GET /api/review` | Versiones generadas por fuente e idioma, con su etapa, y las descartadas |
 | `POST /api/review/{name}/choose` · `/discard` · `/restore` | Elegir (descarta las otras del mismo idioma), descartar, restaurar |
 | `PUT /api/review/{name}/meta` | Título, descripción y tags de una versión |

@@ -389,23 +389,28 @@ func (srv *server) reviewSpec(w http.ResponseWriter, r *http.Request, g *generat
 		pubError(w, err)
 		return
 	}
-	side := readSidecar(path)
+	writeReelSpec(w, g, name, readSidecar(path), g.out, stageGenerated)
+}
+
+// writeReelSpec answers with what the editor needs to reopen the reel name
+// (with JSON side) from dir: its settings, its source and the same reel in
+// the other languages (same source and template, found in dir), since an
+// edit applies to all of them. Versions at stage skip are left out.
+func writeReelSpec(w http.ResponseWriter, g *generator, name string, side map[string]any, dir, skip string) {
 	it := reviewItem(PubItem{Name: name}, side)
 	if _, err := g.sourcePath(it.Source); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	// The same reel in the other languages (same source and template):
-	// refining applies to all of them.
 	siblings := []map[string]any{}
-	entries, _ := os.ReadDir(g.out)
+	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		if e.IsDir() || !validName(e.Name()) || e.Name() == name {
 			continue
 		}
-		sd := readSidecar(filepath.Join(g.out, e.Name()))
+		sd := readSidecar(filepath.Join(dir, e.Name()))
 		o := reviewItem(PubItem{Name: e.Name()}, sd)
-		if o.Source == it.Source && o.Template == it.Template && o.Lang != it.Lang && o.Stage != stageGenerated {
+		if o.Source == it.Source && o.Template == it.Template && o.Lang != it.Lang && o.Stage != skip {
 			siblings = append(siblings, map[string]any{"name": o.Name, "lang": o.Lang, "stage": o.Stage, "settings": sd["settings"]})
 		}
 	}
