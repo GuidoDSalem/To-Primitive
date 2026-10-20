@@ -163,7 +163,7 @@ type PubItem struct {
 	ScheduledAt *time.Time `json:"scheduledAt,omitempty"`
 	PublishedAt *time.Time `json:"publishedAt,omitempty"`
 	Result      string     `json:"result,omitempty"`
-	Brand       string     `json:"brand,omitempty"` // the reel's brand (its record), e.g. @account
+	Brand       string     `json:"brand,omitempty"`    // the reel's brand (its record), e.g. @account
 	Editable    bool       `json:"editable,omitempty"` // has its settings and source: it can reopen in the reel editor
 	Warnings    []string   `json:"warnings,omitempty"`
 }
