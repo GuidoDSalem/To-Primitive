@@ -22,7 +22,8 @@ const Templates = (() => {
   // fractions of the reel; from > to wraps around the loop point. extend:
   // with no other phrase shown after it, it stays until the end.
   const title = (from, to, extra) => ({ role: "title", text: "", from, to, pos: "top", style: "title", ...extra });
-  const closing = (from, to) => ({ role: "closing", text: "", from, to, pos: "lower", style: "subtitle" });
+  const closing = (from, to, text = "") => ({ role: "closing", text, from, to, pos: "lower", style: "subtitle" });
+  const phrase = (role, text, from, to, pos, style, extra) => ({ role, text, from, to, pos, style, ...extra });
 
   const LIST = {
     reveal: {
@@ -44,11 +45,55 @@ const Templates = (() => {
       base: { duration: 15, shapes: 150, mode: 1, build: BUILD, phrases: [title(0.01, 0.68, { extend: true }), closing(0.74, 1)] },
       make: makeShapesVideo,
     },
+    levels: {
+      name: "¿En qué nivel?", kinds: ["image", "video"], aspect: 9 / 16,
+      desc: "Se completa de a niveles (10, 25, 50… formas) y al final aparece el original: ¿en qué nivel la adivinaste?",
+      base: {
+        duration: 15, shapes: 150, mode: 1, build: BUILD,
+        phrases: [
+          phrase("question", "¿En qué nivel la adivinaste?", 0.01, 0.8, "top", "question"),
+          phrase("level", "Nivel {nivel} · {formas} formas", 0, 0.8, "foot", "label"),
+          closing(0.84, 1, "Comentá en qué nivel la adivinaste 👇"),
+        ],
+      },
+      make: makeLevels,
+    },
+    compare: {
+      name: "Comparativa", kinds: ["image", "video"], aspect: 9 / 8, stack: 2,
+      desc: "Arriba el original, abajo las formas armándose, separados por una línea.",
+      base: {
+        duration: 12, shapes: 200, mode: 1, build: BUILD,
+        phrases: [
+          phrase("topLabel", "Original", 0, 1, "top", "label"),
+          phrase("bottomLabel", "{formas} {tipo}", 0, 1, "half", "label"),
+          closing(0.74, 1),
+        ],
+      },
+      make: makeCompare,
+    },
+    curtain: {
+      name: "Cortina", kinds: ["image", "video"], aspect: 9 / 16,
+      desc: "Una línea va y viene: de un lado el original, del otro las formas.",
+      base: {
+        duration: 12, shapes: 200, mode: 1, build: BUILD,
+        phrases: [phrase("question", "¿Se nota la diferencia?", 0.01, 0.7, "top", "question", { extend: true }), closing(0.74, 1)],
+      },
+      make: makeCurtain,
+    },
+    counter: {
+      name: "Contador", kinds: ["image"], aspect: 9 / 16,
+      desc: "Las formas se suman con un contador grande; al final, la foto.",
+      base: {
+        duration: 12, shapes: 300, mode: 1, build: { ...BUILD, curve: "inOutCubic" },
+        phrases: [phrase("counter", "{n} {tipo}", 0, 1, "top", "counter"), closing(0.88, 1)],
+      },
+      make: makeCounter,
+    },
   };
   const auto = (kind) => (kind === "video" ? "shapes" : "reveal");
 
-  const POSITIONS = { top: "Arriba", middle: "Centro", lower: "Abajo" };
-  const STYLES = { title: "Título", subtitle: "Subtítulo", question: "Pregunta", label: "Etiqueta" };
+  const POSITIONS = { top: "Arriba", half: "Mitad (debajo de la línea)", middle: "Centro", lower: "Abajo", foot: "Al pie" };
+  const STYLES = { title: "Título", subtitle: "Subtítulo", question: "Pregunta", label: "Etiqueta", counter: "Contador (grande)" };
   const SHAPE_NAMES = { 0: "formas", 1: "triángulos", 2: "rectángulos", 3: "elipses", 4: "círculos", 5: "rectángulos", 6: "curvas", 7: "elipses", 8: "polígonos" };
 
   // How visible something shown from a to b is at t, fading over f seconds.
@@ -75,6 +120,38 @@ const Templates = (() => {
     ctx.drawImage(scratch, (w - w * s) / 2, (h - h * s) / 2, w * s, h * s);
   }
 
+  // Draw paint(g, w, h) into the rectangle x, y, w, h of ctx (through a
+  // scratch canvas: the shape renderers set their own transform).
+  function inRect(ctx, x, y, w, h, scratches, paint) {
+    w = Math.max(1, Math.round(w));
+    h = Math.max(1, Math.round(h));
+    const key = w + "x" + h;
+    let scratch = scratches.get(key);
+    if (!scratch) {
+      scratch = document.createElement("canvas");
+      scratch.width = w;
+      scratch.height = h;
+      scratches.set(key, scratch);
+    }
+    paint(scratch.getContext("2d"), w, h);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(scratch, Math.round(x), Math.round(y));
+  }
+
+  // The first n shapes of a photo, the ones from `from` on faded by f.
+  function drawShapes(ctx, img, w, h, n, from = n, f = 1) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = img.background;
+    ctx.fillRect(0, 0, w, h);
+    const sx = w / img.width, sy = h / img.height;
+    ctx.setTransform(sx, 0, 0, sy, 0.5 * sx, 0.5 * sy);
+    for (let i = 0; i < Math.min(n, img.shapes.length); i++) Motion.drawShape(ctx, img.shapes[i], i < from ? 1 : f);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  const shapeCount = (src) => (src.kind === "image" ? src.image.shapes.length : Math.max(0, ...src.anim.keyframes.map((k) => k.length)));
+  const lengthOf = (src) => (src.kind === "image" ? src.duration : src.anim.duration);
+
   function overlay(ctx, a, paint) {
     if (a <= 0) return;
     ctx.save();
@@ -86,13 +163,14 @@ const Templates = (() => {
   // ---------- contents ----------
 
   // src: { kind, image (photo shapes) | anim (video keyframes), duration (photo),
-  //        paintOriginal(ctx, w, h),
+  //        paintOriginal(ctx, x, y, w, h): the original into that rectangle,
   //        build: { order, curve, effect, effectTime } (photos, as in the
   //        editor's recording), interp: "smooth" | "linear" | "step" (videos) }
-  // Returns { id, duration, paint(ctx, t, w, h), videoTime(t), originalFrom }:
-  // paint fills w x h with the content (no texts), videoTime says which
-  // second of the portion the original video shows (null = none), and
-  // originalFrom is when the original starts being visible.
+  // Returns { id, duration, paint(ctx, t, w, h), videoTime(t), originalFrom,
+  // vars?(t) }: paint fills w x h with the content (no texts), videoTime says
+  // which second of the portion the original video shows (null = none),
+  // originalFrom is when the original starts being visible, and vars gives
+  // values for the phrases ({nivel}, {n}...).
   function make(id, src) {
     const b = { ...BUILD, ...src.build };
     return { id, ...LIST[id].make(src, b, src.interp || "smooth") };
@@ -109,7 +187,7 @@ const Templates = (() => {
       duration: D, videoTime: () => null, originalFrom: F,
       paint(ctx, t, w, h) {
         plan.render(ctx, t, w, h);
-        overlay(ctx, smooth((t - F) / X), () => src.paintOriginal(ctx, w, h));
+        overlay(ctx, smooth((t - F) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
       },
     };
   }
@@ -121,7 +199,7 @@ const Templates = (() => {
       duration: D, videoTime: (t) => t, originalFrom: D - X,
       paint(ctx, t, w, h) {
         Motion.render(ctx, src.anim, t, interp, w, h);
-        overlay(ctx, smooth((t - (D - X)) / X), () => src.paintOriginal(ctx, w, h));
+        overlay(ctx, smooth((t - (D - X)) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
       },
     };
   }
@@ -155,11 +233,137 @@ const Templates = (() => {
     };
   }
 
+  // Levels: 10, 25, 50, 100... shapes (at most five), then all of them.
+  function levelCounts(n) {
+    const steps = [10, 25, 50, 100, 250, 500, 1000, 2500].filter((k) => k < n * 0.8);
+    return [...steps.slice(-4), n];
+  }
+
+  // The image completes level by level (each one held), then the original.
+  // Videos play the portion with each level's shapes in turn.
+  function makeLevels(src, b, interp) {
+    const D = lengthOf(src), counts = levelCounts(shapeCount(src)), L = counts.length;
+    const R = 0.8 * D, per = R / L, X = clamp(0.08 * D, 0.5, 1.5);
+    const level = (t) => clamp(Math.floor(t / per), 0, L - 1);
+    return {
+      duration: D, videoTime: src.kind === "video" ? (t) => t : () => null, originalFrom: R,
+      vars: (t) => ({ nivel: level(t) + 1, niveles: L, formas: counts[level(t)] }),
+      paint(ctx, t, w, h) {
+        const k = level(t);
+        if (src.kind === "image") {
+          // The new shapes of each level fade in quickly.
+          const u = smooth((t - k * per) / Math.min(0.5, per * 0.4));
+          drawShapes(ctx, src.image, w, h, counts[k], k ? counts[k - 1] : 0, u);
+        } else {
+          Motion.render(ctx, src.anim, t, interp, w, h, counts[k]);
+        }
+        overlay(ctx, smooth((t - R) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
+      },
+    };
+  }
+
+  // Original on top, shapes below (each a 9:8 panel), a line between them.
+  function makeCompare(src, b, interp) {
+    const D = lengthOf(src), scratch = new Map();
+    const plan = src.kind === "image" && Build.plan(src.image, {
+      direction: "build", order: b.order, curve: b.curve, effect: b.effect,
+      effectTime: Math.min(b.effectTime, D * 0.2), duration: 0.65 * D, holdStart: 0.3, holdEnd: D,
+    });
+    return {
+      duration: D, videoTime: src.kind === "video" ? (t) => t : () => null, originalFrom: 0,
+      paint(ctx, t, w, h) {
+        const hh = Math.round(h / 2);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, w, h);
+        src.paintOriginal(ctx, 0, 0, w, hh);
+        inRect(ctx, 0, hh, w, h - hh, scratch, (g, gw, gh) => (plan ? plan.render(g, t, gw, gh) : Motion.render(g, src.anim, t, interp, gw, gh)));
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, hh - Math.max(1, h * 0.002), w, Math.max(2, h * 0.004));
+      },
+    };
+  }
+
+  // A line sweeps back and forth: the original on its left, the shapes on
+  // its right. Periodic, so the reel also loops cleanly.
+  function makeCurtain(src, b, interp) {
+    const D = lengthOf(src);
+    const pos = (t) => 0.5 + 0.4 * Math.sin((4 * Math.PI * t) / D); // two sweeps
+    return {
+      duration: D, videoTime: src.kind === "video" ? (t) => t : () => null, originalFrom: 0,
+      paint(ctx, t, w, h) {
+        if (src.kind === "image") drawShapes(ctx, src.image, w, h, Infinity);
+        else Motion.render(ctx, src.anim, t, interp, w, h);
+        const x = Math.round(w * pos(t));
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.beginPath();
+        ctx.rect(0, 0, x, h);
+        ctx.clip();
+        src.paintOriginal(ctx, 0, 0, w, h);
+        ctx.restore();
+        // The line and its handle.
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.shadowColor = "rgba(0,0,0,0.5)";
+        ctx.shadowBlur = w * 0.01;
+        ctx.fillStyle = "#fff";
+        const lw = Math.max(2, w * 0.006);
+        ctx.fillRect(x - lw / 2, 0, lw, h);
+        const r = w * 0.045;
+        ctx.beginPath();
+        ctx.arc(x, h * 0.5, r, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.shadowColor = "transparent";
+        ctx.fillStyle = "#222";
+        for (const dir of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(x + dir * r * 0.65, h * 0.5);
+          ctx.lineTo(x + dir * r * 0.2, h * 0.5 - r * 0.35);
+          ctx.lineTo(x + dir * r * 0.2, h * 0.5 + r * 0.35);
+          ctx.fill();
+        }
+        ctx.restore();
+      },
+    };
+  }
+
+  // The shapes add up with a counter ({n}); at the end, the photo.
+  function makeCounter(src, b) {
+    const D = src.duration, B = 0.7 * D, F = 0.86 * D, X = clamp(0.08 * D, 0.5, 1.2);
+    const opts = {
+      direction: "build", order: b.order, curve: b.curve, effect: b.effect,
+      effectTime: Math.min(b.effectTime, B * 0.3), duration: B, holdStart: 0.3, holdEnd: D,
+    };
+    const plan = Build.plan(src.image, opts);
+    // When each shape starts, sorted, to count the ones already in.
+    const sch = Build.schedule(src.image, opts, opts.effect === "none" ? 0 : opts.effectTime);
+    const starts = src.image.shapes.map((_, i) => sch.startOf(i)).sort((a, c) => a - c);
+    const count = (t) => {
+      const bt = sch.buildTime(t);
+      if (bt <= 0) return 0;
+      let lo = 0, hi = starts.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (starts[m] <= bt) lo = m + 1; else hi = m; }
+      return lo;
+    };
+    return {
+      duration: D, videoTime: () => null, originalFrom: F,
+      vars: (t) => ({ n: count(t) }),
+      paint(ctx, t, w, h) {
+        plan.render(ctx, t, w, h);
+        overlay(ctx, smooth((t - F) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
+      },
+    };
+  }
+
   // ---------- phrases ----------
 
-  // Base phrases of a template, keeping the texts already written (by role).
+  // Base phrases of a template, keeping the texts written by hand (by role;
+  // other templates' default texts don't carry over).
   function phrasesFor(id, current = []) {
-    const texts = new Map(current.filter((p) => p.text.trim()).map((p) => [p.role, p.text]));
+    const defaults = new Set(Object.values(LIST).flatMap((tpl) => tpl.base.phrases.map((p) => p.text)));
+    const texts = new Map(current.filter((p) => p.text.trim() && !defaults.has(p.text)).map((p) => [p.role, p.text]));
     return LIST[id].base.phrases.map((p) => ({ ...p, text: texts.get(p.role) ?? p.text }));
   }
 
@@ -230,6 +434,7 @@ const Templates = (() => {
     subtitle: { size: 0.036, weight: 800, maxLines: 4 },
     question: { size: 0.05, weight: 900, maxLines: 3 },
     label: { size: 0.026, weight: 700, maxLines: 2, pill: true },
+    counter: { size: 0.075, weight: 900, maxLines: 2 },
   };
 
   // Phrases (with their timing) and the brand, over a W x H frame at time t.
@@ -247,8 +452,10 @@ const Templates = (() => {
     const narrow = W * (1 - 2 * (SAFE.right + 0.02));
     const places = {
       top: { y: H * (SAFE.top + 0.035), anchor: "top", maxWidth: W * 0.84 },
+      half: { y: H * 0.52, anchor: "top", maxWidth: narrow },
       middle: { y: H * 0.45, anchor: "center", maxWidth: narrow },
       lower: { y: H * 0.66, anchor: "center", maxWidth: narrow },
+      foot: { y: H * 0.755, anchor: "center", maxWidth: narrow },
     };
     for (const p of phrases) {
       if (!p.text.trim()) continue;

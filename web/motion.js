@@ -55,8 +55,9 @@ const Motion = (() => {
   }
 
   // The shapes to draw at keyframe position x (fractional keyframe index), in
-  // drawing order, each with an opacity factor: [[shape, factor], ...].
-  function shapesAt(anim, x, mode) {
+  // drawing order, each with an opacity factor: [[shape, factor], ...]. With
+  // limit, only the first `limit` shapes (the coarsest) of each keyframe.
+  function shapesAt(anim, x, mode, limit = Infinity) {
     const kfs = anim.keyframes;
     if (!kfs.length) return [];
     x = clamp(x, 0, kfs.length - 1);
@@ -64,7 +65,7 @@ const Motion = (() => {
     const u = mode === "step" ? 0 : x - k;
     const A = kfs[k], B = kfs[k + 1];
     const out = [];
-    for (let i = 0; i < A.length; i++) {
+    for (let i = 0; i < Math.min(A.length, limit); i++) {
       const a = A[i], b = B?.[i];
       if (!b || u === 0) out.push([a, 1]);
       else if (continues(a, b)) out.push([between(kfs, i, k, u, mode), 1]);
@@ -120,15 +121,16 @@ const Motion = (() => {
     }
   }
 
-  // Draw the animation at time t (seconds) filling a w x h canvas.
-  function render(ctx, anim, t, mode, w, h) {
+  // Draw the animation at time t (seconds) filling a w x h canvas (only the
+  // first `limit` shapes, if given).
+  function render(ctx, anim, t, mode, w, h, limit) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = anim.background;
     ctx.fillRect(0, 0, w, h);
     const sx = w / anim.width, sy = h / anim.height;
     // Same half-pixel offset primitive uses when drawing.
     ctx.setTransform(sx, 0, 0, sy, 0.5 * sx, 0.5 * sy);
-    for (const [s, f] of shapesAt(anim, t * anim.kfps, mode)) drawShape(ctx, s, f);
+    for (const [s, f] of shapesAt(anim, t * anim.kfps, mode, limit)) drawShape(ctx, s, f);
   }
 
   // ---------- MP4 export (WebCodecs) ----------

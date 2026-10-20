@@ -43,22 +43,40 @@ function sourceSize() {
 
 // The region of the source shown in the frame, as fractions; null when the
 // whole source is fitted ("fit").
+// The template decides the shape of the region (9:16, or 9:8 panels for a
+// comparison): the shapes are computed on exactly that.
+const layout = () => {
+  const spec = Templates.LIST[templateId()];
+  return { aspect: spec?.aspect ?? ASPECT, stack: spec?.stack ?? 1 };
+};
+
 function crop() {
   if (reel.framing.mode !== "fill") return null;
   const [w, h] = sourceSize();
   if (!w || !h) return null;
-  let bw = w, bh = w / ASPECT; // largest 9:16 rectangle inside the source
-  if (bh > h) { bh = h; bw = h * ASPECT; }
+  const A = layout().aspect;
+  let bw = w, bh = w / A; // largest rectangle of that shape inside the source
+  if (bh > h) { bh = h; bw = h * A; }
   const cw = bw / reel.framing.zoom, ch = bh / reel.framing.zoom;
   const r = (v) => Math.round(v * 1e5) / 1e5;
   return { x: r(((w - cw) * reel.framing.px) / w), y: r(((h - ch) * reel.framing.py) / h), w: r(cw / w), h: r(ch / h) };
 }
 
-// Aspect (width / height) of what the content covers.
+// Aspect (width / height) of what the content covers (panels stacked).
 function contentAspect() {
-  if (reel.framing.mode === "fill") return ASPECT;
+  const { aspect, stack } = layout();
+  if (reel.framing.mode === "fill") return aspect / stack;
   const [w, h] = sourceSize();
-  return w && h ? w / h : ASPECT;
+  return w && h ? w / h / stack : ASPECT;
+}
+
+// Draw panel(ctx, x, y, w, h, i) for each stacked panel of a w x h content.
+function panels(ctx, w, h, panel) {
+  const n = layout().stack;
+  for (let i = 0; i < n; i++) {
+    const y0 = Math.round((i * h) / n), y1 = Math.round(((i + 1) * h) / n);
+    panel(ctx, 0, y0, w, y1 - y0, i);
+  }
 }
 
 // Scratch canvases for drawFramed, one set per target so that drawing the
@@ -101,19 +119,22 @@ function drawFramed(ctx, W, H, paint, bufs = previewBufs) {
 
 // The original (photo, or the video's current frame) with the current
 // framing. over: draw only the picture, on top of what's there (fades).
-function paintOriginal(ctx, w, h, over = false) {
+function paintOriginal(ctx, w, h, over = false, x = 0, y = 0) {
   const el = reel.kind === "image" ? reel.img : srcVideo;
   const [sw, sh] = sourceSize();
   const c = crop() ?? { x: 0, y: 0, w: 1, h: 1 };
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (!over) {
     ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(x, y, w, h);
   }
   if (sw && (reel.kind === "image" || srcVideo.readyState >= 2)) {
-    ctx.drawImage(el, c.x * sw, c.y * sh, c.w * sw, c.h * sh, 0, 0, w, h);
+    ctx.drawImage(el, c.x * sw, c.y * sh, c.w * sw, c.h * sh, x, y, w, h);
   }
 }
+
+// The original in every panel (what's being framed).
+const paintOriginalPanels = (ctx, w, h) => panels(ctx, w, h, (c, x, y, pw, ph) => paintOriginal(c, pw, ph, false, x, y));
 
 // ---------- template, duration and texts ----------
 
@@ -141,7 +162,7 @@ function composition(id = templateId()) {
   if (!cache.has(key)) {
     cache.set(key, Templates.make(id, {
       kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, duration: reelSeconds(), build, interp,
-      paintOriginal: (ctx, w, h) => paintOriginal(ctx, w, h, true),
+      paintOriginal: (ctx, x, y, w, h) => paintOriginal(ctx, w, h, true, x, y),
     }));
   }
   return cache.get(key);
@@ -152,7 +173,7 @@ function renderReel(ctx, comp, t, W, H, bufs) {
   drawFramed(ctx, W, H, (c, w, h) => comp.paint(c, t, w, h), bufs);
   // Another template (a card) shows with its own phrases, carrying the texts.
   const phrases = comp.id === templateId() ? reel.phrases : Templates.phrasesFor(comp.id, reel.phrases);
-  Templates.drawTexts(ctx, W, H, t, comp.duration, phrases, textVars(), $("tBrand").value);
+  Templates.drawTexts(ctx, W, H, t, comp.duration, phrases, { ...textVars(), ...comp.vars?.(t) }, $("tBrand").value);
 }
 
 // ---------- shape parameters (as in the editor) ----------
@@ -360,20 +381,28 @@ $("pause").addEventListener("click", () => {
 });
 
 // The live shapes, filling w x h.
+// The live shapes, filling w x h; with stacked panels (a comparison), the
+// original on top and the shapes below.
 function paintLive(ctx, w, h) {
   const im = live.img;
-  if (!im) {
-    paintOriginal(ctx, w, h);
-    return;
-  }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = im.background;
-  ctx.fillRect(0, 0, w, h);
-  const sx = w / im.width, sy = h / im.height;
-  ctx.setTransform(sx, 0, 0, sy, 0.5 * sx, 0.5 * sy);
-  const n = Math.min(params().shapes, im.shapes.length);
-  for (let i = 0; i < n; i++) if (im.shapes[i]) Motion.drawShape(ctx, im.shapes[i], 1);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  panels(ctx, w, h, (c, x, y, pw, ph, i) => {
+    if (!im || i < layout().stack - 1) {
+      paintOriginal(c, pw, ph, false, x, y);
+      return;
+    }
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = im.background;
+    c.fillRect(x, y, pw, ph);
+    const sx = pw / im.width, sy = ph / im.height;
+    c.save();
+    c.beginPath();
+    c.rect(x, y, pw, ph);
+    c.clip();
+    c.setTransform(sx, 0, 0, sy, x + 0.5 * sx, y + 0.5 * sy);
+    const n = Math.min(params().shapes, im.shapes.length);
+    for (let j = 0; j < n; j++) if (im.shapes[j]) Motion.drawShape(c, im.shapes[j], 1);
+    c.restore();
+  });
 }
 
 // ---------- video computation ----------
@@ -438,8 +467,9 @@ $("generate").addEventListener("click", async () => {
   const key = genKey();
   $("generate").textContent = "Cancelar";
   setProgress(0, "Preparando…");
-  // Free the CPU for the computation, as the editor does.
-  if (!live.paused) $("pause").click();
+  // Free the CPU for the computation, as the editor does (and resume after).
+  const resume = !live.paused;
+  if (resume) $("pause").click();
   const started = performance.now();
   try {
     reel.gen = { key, anim: await generateVideo(params()) };
@@ -451,6 +481,7 @@ $("generate").addEventListener("click", async () => {
     setProgress(null, e.name === "AbortError" ? "Cancelado." : "Error: " + e.message);
   } finally {
     reel.generating = null;
+    if (resume && live.paused) $("pause").click();
     $("generate").textContent = "Calcular el video";
     refreshUI();
   }
@@ -549,7 +580,7 @@ const player = (() => {
     } else if (view === "shapes") {
       drawFramed(ctx, w, h, paintLive);
     } else {
-      drawFramed(ctx, w, h, paintOriginal);
+      drawFramed(ctx, w, h, paintOriginalPanels);
     }
     $("seek").max = dur;
     $("seek").value = t;
@@ -660,6 +691,7 @@ const cards = (() => {
     b.addEventListener("click", () => {
       reel.template = id;
       applyBase();
+      restartLiveSoon(); // the region may change shape (9:16 / 9:8)
       if (reel.kind === "video") applyDuration();
       refreshUI();
       player.seek(0);
@@ -674,7 +706,7 @@ const cards = (() => {
     if (comp) {
       renderReel(ctx, comp, (now / 1000) % comp.duration, canvas.width, canvas.height, c.bufs);
     } else if (reel.kind) {
-      drawFramed(ctx, canvas.width, canvas.height, paintOriginal, c.bufs);
+      drawFramed(ctx, canvas.width, canvas.height, paintOriginalPanels, c.bufs);
     } else {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = "#000";
