@@ -1402,7 +1402,7 @@ function reelMeta(comp, res, seconds) {
     shapes: params(),
     animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
     base: reel.base, changedByHand: [...reel.touched], lang: reel.lang,
-    phrases: reel.phrases.filter((p) => p.text.trim()).map(({ role, text, from, to, pos, style }) => ({ role, text, from, to, pos, style })),
+    phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
     brand: $("tBrand").value,
     audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
     export: { width: res.width, height: res.height, fps: 30, codec: res.codec, seconds: Math.round(seconds * 10) / 10 },
@@ -1479,6 +1479,14 @@ $("export").addEventListener("click", async () => {
   delete $("expStatus").dataset.done;
   const started = performance.now();
   try {
+    if (REFINE) {
+      // A generated version: it's saved over itself, ready for the queue.
+      await encodeAndSend(comp, { refine: REFINE }, exporting.signal, setExport);
+      setExport(null, `Versión refinada guardada en ${((performance.now() - started) / 1000).toFixed(1)} s. Volvé a Revisar para mandarla a la cola.`);
+      $("expStatus").dataset.done = "1";
+      $("refineState").textContent = "· guardada ✓";
+      return;
+    }
     const entry = await encodeAndSend(comp, { save: "1" }, exporting.signal, setExport);
     const link = document.createElement("a");
     link.href = `/api/reels/${entry.id}/video?download=1`;
@@ -1494,7 +1502,7 @@ $("export").addEventListener("click", async () => {
     $("expStatus").dataset.done = "1";
   } finally {
     exporting = null;
-    $("export").textContent = "Exportar reel (MP4 1080×1920)";
+    $("export").textContent = exportLabel();
     refreshUI();
   }
 });
@@ -1563,6 +1571,98 @@ async function loadLibrary() {
 refreshUI();
 player.draw();
 loadLibrary();
+
+// ---------- refining a generated version ----------
+
+// reels.html?refine=<name>: a version from the generator, reopened with all
+// its settings to adjust them by hand and save it again over itself.
+const REFINE = new URLSearchParams(location.search).get("refine");
+const exportLabel = () => (REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
+
+// Load a source from a URL into the editor (a WebM copy if this browser
+// can't play the video).
+async function loadFromURL(url, name, type, kind, compatURL) {
+  const get = async (u, n, t) => {
+    const res = await fetch(u);
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    await loadSource(new File([blob], n, { type: t || blob.type }));
+  };
+  await get(url, name, type);
+  if (!reel.kind && kind === "video" && compatURL) await get(compatURL, name.replace(/\.\w+$/, "") + ".webm", "video/webm");
+  if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
+}
+
+// Put the editor back in the state a reel's record describes.
+function restoreRecord(m) {
+  if (m.template) reel.template = m.template;
+  applyBase(true);
+  reel.lang = m.lang || reel.lang;
+  if (m.framing) {
+    reel.framing = { ...reel.framing, ...m.framing };
+    syncFramingInputs();
+  }
+  const p = m.shapes;
+  if (p) {
+    $("shapes").value = p.shapes;
+    for (const b of $("mode").children) b.classList.toggle("on", +b.dataset.value === p.mode);
+    $("alphaAuto").checked = p.alpha === 0;
+    if (p.alpha) $("alpha").value = p.alpha;
+    $("repeat").value = p.repeat;
+    $("inputSize").value = p.inputSize;
+    $("bgAuto").checked = !p.background;
+    if (p.background) $("background").value = p.background;
+  }
+  const a = m.animation || {};
+  if (reel.kind === "image") {
+    for (const [id, key] of [["recOrder", "order"], ["recCurve", "curve"], ["recEffect", "effect"], ["recEffectTime", "effectTime"]]) {
+      if (a[key] !== undefined) $(id).value = a[key];
+    }
+    Picker.refresh();
+  } else {
+    if (a.kfps) $("kfps").value = String(a.kfps);
+    if (a.adapt !== undefined) $("adapt").value = a.adapt;
+    if (a.flow !== undefined) $("videoFlow").checked = a.flow;
+    if (a.interp) $("interp").value = a.interp;
+  }
+  if (m.durationChoice) {
+    reel.duration = { ...reel.duration, ...m.durationChoice };
+    $("durFree").value = reel.duration.free;
+  }
+  if (reel.kind === "video" && m.source?.portion) setPortion(m.source.portion.start, m.source.portion.end);
+  if (Array.isArray(m.phrases) && m.phrases.length) {
+    reel.phrases = m.phrases.map((ph) => ({ ...ph, text: ph.text ?? "" }));
+  }
+  renderPhrases();
+  $("tBrand").value = m.brand || "";
+  if (m.audio) {
+    if (m.audio.mode === "source" && reel.video?.info.hasAudio) reel.audio.mode = "source";
+    if (m.audio.volume !== undefined) $("volume").value = m.audio.volume;
+    if (m.audio.fadeOut !== undefined) $("fadeOut").value = m.audio.fadeOut;
+  }
+  // Everything restored counts as chosen: switching templates keeps it.
+  reel.touched = new Set([...(m.changedByHand || []), "duration", "shapes", "mode", "build", "phrases"]);
+}
+
+async function runRefine(name) {
+  $("refineBar").hidden = false;
+  $("refineName").textContent = name;
+  $("export").textContent = exportLabel();
+  try {
+    const spec = await api(`/api/review/${encodeURIComponent(name)}/spec`);
+    $("refineState").textContent = `· ${(spec.lang || "").toUpperCase()} · ${Templates.LIST[spec.template]?.name ?? spec.template}`;
+    const src = `/api/review/${encodeURIComponent(name)}/source`;
+    await loadFromURL(src, spec.source.name, spec.source.type, spec.source.kind, null);
+    restoreRecord(spec.settings || {});
+    sendParams();
+    restartLiveSoon(); // the restored framing
+    refreshUI();
+    if (reel.kind === "video") $("generate").click(); // see the reel as it was, then adjust
+  } catch (e) {
+    $("refineState").textContent = "· no se pudo abrir: " + e.message;
+  }
+}
+if (REFINE) runRefine(REFINE);
 
 // ---------- automatic mode ----------
 

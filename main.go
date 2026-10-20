@@ -162,6 +162,16 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/auto/outputs/{name}/video", srv.withGenerator(srv.genVideo))
 	mux.HandleFunc("POST /api/auto/outputs/{name}/queue", srv.withGenerator(srv.genToQueue))
 	mux.HandleFunc("DELETE /api/auto/outputs/{name}", srv.withGenerator(srv.genDelete))
+
+	mux.HandleFunc("GET /api/review", srv.withGenerator(srv.reviewOverview))
+	mux.HandleFunc("POST /api/review/{name}/choose", srv.withGenerator(srv.reviewAction((*generator).Choose)))
+	mux.HandleFunc("POST /api/review/{name}/discard", srv.withGenerator(srv.reviewAction((*generator).Discard)))
+	mux.HandleFunc("POST /api/review/{name}/restore", srv.withGenerator(srv.reviewAction((*generator).Restore)))
+	mux.HandleFunc("PUT /api/review/{name}/meta", srv.withGenerator(srv.reviewMeta))
+	mux.HandleFunc("GET /api/review/{name}/spec", srv.withGenerator(srv.reviewSpec))
+	mux.HandleFunc("GET /api/review/{name}/source", srv.withGenerator(srv.reviewSource))
+	mux.HandleFunc("GET /api/review/discarded/{name}/video", srv.withGenerator(srv.reviewDiscardedVideo))
+	mux.HandleFunc("POST /api/review/{name}/queue", srv.withGenerator(srv.reviewQueue))
 	return mux
 }
 

@@ -102,37 +102,6 @@ function jobRow(j) {
   return row;
 }
 
-function outputCard(it, publishing) {
-  const card = document.createElement("div");
-  card.className = "item";
-  const pos = Object.assign(document.createElement("div"), { className: "pos", textContent: "" });
-  const video = document.createElement("video");
-  video.src = `/api/auto/outputs/${enc(it.name)}/video#t=${Math.min(it.duration * 0.6, 8).toFixed(1)}`;
-  video.preload = "metadata";
-  video.muted = true;
-  video.playsInline = true;
-  video.title = "Reproducir";
-  video.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
-  const body = document.createElement("div");
-  body.className = "body";
-  const add = (cls, text) => body.append(Object.assign(document.createElement("div"), { className: cls, textContent: text }));
-  add("title", it.title);
-  add("file", `${it.name} · ${fmtDur(it.duration)} · ${it.width}×${it.height} · ${(it.size / 1e6).toFixed(1)} MB`);
-  add("desc", it.description);
-  for (const w of it.warnings ?? []) add("warn", "⚠ " + w);
-  const actions = document.createElement("div");
-  actions.className = "actions";
-  if (publishing) {
-    actions.append(button("A la cola", "Lo mueve a la carpeta de publicación", () => act(api(`/api/auto/outputs/${enc(it.name)}/queue`, { method: "POST" }))));
-  }
-  const dl = Object.assign(document.createElement("a"), { className: "button", href: `/api/auto/outputs/${enc(it.name)}/video?download=1`, textContent: "Descargar" });
-  actions.append(dl, button("Borrar", "", () => {
-    if (confirm(`¿Borrar "${it.name}"?`)) act(api(`/api/auto/outputs/${enc(it.name)}`, { method: "DELETE" }));
-  }));
-  card.append(pos, video, body, actions);
-  return card;
-}
-
 function show(o, settingsToo = false) {
   view = o;
   if (settingsToo || !dirty) showSettings(o);
@@ -144,7 +113,9 @@ function show(o, settingsToo = false) {
   $("jobCount").textContent = active ? `${active} pendientes` : "";
   $("jobs").replaceChildren(...(o.jobs.length ? o.jobs.slice(0, 60).map(jobRow) : [Object.assign(document.createElement("p"), { className: "none-yet", textContent: "Dejá fotos o videos en la carpeta de entrada." })]));
   $("outCount").textContent = o.outputs.length;
-  $("outputs").replaceChildren(...(o.outputs.length ? o.outputs.map((it) => outputCard(it, o.publishing)) : [Object.assign(document.createElement("p"), { className: "none-yet", textContent: "Todavía no se generó nada." })]));
+  $("outSummary").textContent = o.outputs.length
+    ? `${o.outputs.length} versiones esperan revisión: elegí una por idioma, refinala y mandala a la cola.`
+    : "Todavía no se generó nada.";
   $("log").replaceChildren(...o.log.slice(0, 25).map((e) => {
     const li = document.createElement("li");
     if (e.action === "error") li.className = "error";

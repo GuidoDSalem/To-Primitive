@@ -190,7 +190,7 @@ Próximas etapas: una cola de publicación con una regla configurable (por ejemp
 
 `/generar.html` (enlace "generar" arriba de los editores). Cada foto o video que dejes en la **carpeta de entrada** se convierte sola en varios reels, **uno por template** (los que correspondan: algunos son solo para fotos o solo para videos), con la configuración base de cada uno. Los reels van a la **carpeta de generados**, cada uno con su JSON (título y descripción sacados de sus frases, más el registro de cómo se hizo), aparte de la carpeta de publicación. Cuando están todas las versiones, la fuente pasa a `procesados/` dentro de la entrada.
 
-- En la página se elige qué templates generar y se puede pausar. Muestra cada trabajo con su avance, los errores (con **Reintentar**) y los reels generados, que se pueden ver, descargar, borrar o mandar **A la cola** de publicación.
+- En la página se elige qué templates generar y se puede pausar. Muestra cada trabajo con su avance y los errores (con **Reintentar**); los reels generados se revisan en **Revisar** (ver abajo).
 - Las fuentes se toman cuando terminan de copiarse (el tamaño deja de cambiar) y se procesan de a una. Si el servidor se reinicia, lo que estaba a medio hacer vuelve a la cola.
 - **Cómo funciona:** para que los reels salgan idénticos a los del editor, el servidor abre el mismo editor de reels en un **Chromium sin pantalla** (`reels.html?auto=<trabajo>`). Esa página carga la fuente, elige el template con su base, espera las formas (o calcula el video), exporta y devuelve el MP4. Si el navegador no puede reproducir el video (Chromium sin H.264), el servidor le da una copia en WebM. La imagen de Docker trae Chromium y las fuentes (con emoji). Sin Docker hace falta tener Chromium o Chrome instalado (`CHROME_BIN` para indicar cuál).
 - Cada reel tarda aproximadamente 1 minuto (30 s a 1 min con 150 formas; más con Mosaico, de 500, o con ¿Cuál preferís?, que calcula cuatro tipos de forma).
@@ -208,6 +208,17 @@ Cada reel generado sale **en cada idioma configurado** (por defecto español e i
 - Los idiomas son códigos de dos letras (`es, en, pt…`); cada uno suma una versión de cada reel, o sea más tiempo de generación.
 
 **Carpetas con Docker** (en `.env`, ver `.env.example`): `INPUT_HOST_DIR` (entrada, se monta en `/entrada`) y `GENERATED_HOST_DIR` (generados, en `/generados`). Sin Docker: `-input` / `INPUT_DIR` (por defecto `./entrada`) y `-generated` / `GENERATED_DIR` (por defecto `./generados`).
+
+
+## Revisar: elegir, refinar y mandar a la cola
+
+`/revisar.html`. Lo generado no va directo a publicar: pasa por vos.
+
+1. **Elegir.** Las versiones de cada fuente aparecen agrupadas por idioma. **▶** (o un clic en el video) las abre en **pantalla completa**, con sonido, para recorrerlas con el teclado: ← → otra versión, **Enter** elegir, **X** descartar, Espacio pausa, **F** pantalla completa del navegador, Esc cerrar. Elegir una deja **una sola por idioma**: las demás de esa fuente e idioma pasan a `descartados/` dentro de Generados (se pueden **restaurar**).
+2. **Refinar.** La elegida se abre en el editor de reels (`reels.html?refine=<versión>`) con todo lo que la generó: template, encuadre, formas, algoritmo, animación, duración o tramo, frases (en su idioma), marca y audio. Se ajusta como siempre y **Guardar versión refinada** la reemplaza. También se pueden editar su título, descripción y tags (**Textos**).
+3. **A la cola.** Solo las refinadas pueden ir a la carpeta de publicación. Si se desmarca "Pedir el refinado antes de la cola", alcanza con elegirlas.
+
+La etapa de cada versión (generada, elegida, refinada) se guarda en su JSON (`"stage"`).
 
 ## Publicar
 
@@ -374,6 +385,12 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/auto/jobs/{id}/progress` · `/fail` · `/retry` | Avance, error y reintento de un trabajo |
 | `GET /api/auto/outputs/{name}/video` · `POST …/queue` · `DELETE` | Ver, mandar a la cola de publicación o borrar un reel generado |
 | `POST /api/reels/mux` con `job` | El reel terminado de un trabajo (va a la carpeta de generados) |
+| `GET /api/review` | Versiones generadas por fuente e idioma, con su etapa, y las descartadas |
+| `POST /api/review/{name}/choose` · `/discard` · `/restore` | Elegir (descarta las otras del mismo idioma), descartar, restaurar |
+| `PUT /api/review/{name}/meta` | Título, descripción y tags de una versión |
+| `GET /api/review/{name}/spec` · `/source` | Lo que el editor necesita para refinarla: su registro y su fuente |
+| `POST /api/reels/mux` con `refine` | La versión refinada (la reemplaza) |
+| `POST /api/review/{name}/queue` | A la carpeta de publicación (refinada, o elegida si no se pide refinado) |
 
 La biblioteca de reels vive en `REELS_DIR` (o `-reels`), por defecto `./reels`. A diferencia de los archivos subidos, no se borra al reiniciar. En Docker es el volumen `reels` (montado en `/reels`).
 

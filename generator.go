@@ -58,6 +58,9 @@ type GenSettings struct {
 	Templates []string    `json:"templates"`
 	Languages []string    `json:"languages"` // one version of each reel per language (e.g. es, en)
 	LLM       LLMSettings `json:"llm"`       // who writes titles, descriptions, tags and translations
+	// Versions can go to the publishing queue once chosen, without the
+	// manual refining step (by default it's required).
+	SkipRefine bool `json:"skipRefine"`
 }
 
 func (s GenSettings) langs() []string {

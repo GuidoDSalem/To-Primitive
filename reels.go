@@ -314,6 +314,15 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	// refine=<name>: a generated version exported again from the editor.
+	if name := r.FormValue("refine"); name != "" && srv.gen != nil {
+		if err := srv.gen.Refine(name, out, json.RawMessage(r.FormValue("meta"))); err != nil {
+			pubError(w, err)
+			return
+		}
+		writeJSON(w, map[string]string{"name": name})
+		return
+	}
 	// job=<id>: a reel the generator asked for (saved in its output folder).
 	if job := r.FormValue("job"); job != "" && srv.gen != nil {
 		name, err := srv.gen.Complete(job, out, json.RawMessage(r.FormValue("meta")))

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive · Revisar</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="publicar.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Revisar</h1>
+      <p class="sub">Elegir, refinar y mandar a publicar · <a href="generar.html">generar</a> · <a href="publicar.html">publicar</a> · <a href="reels.html">editor de reels</a></p>
+    </header>
+
+    <section>
+      <h2>Pasos</h2>
+      <ol class="steps">
+        <li><strong>Elegir:</strong> mirá las versiones de cada fuente (▶ las abre en pantalla completa) y quedate con una por idioma. Las demás pasan a descartados.</li>
+        <li><strong>Refinar:</strong> la elegida se abre en el editor de reels con todos sus ajustes; cambiá lo que quieras y guardala.</li>
+        <li><strong>A la cola:</strong> la versión refinada pasa a la carpeta de publicación.</li>
+      </ol>
+      <label class="check"><input id="refineRequired" type="checkbox" checked> Pedir el refinado antes de la cola</label>
+      <p class="hint">Si lo desmarcás, una versión elegida ya puede ir a la cola.</p>
+    </section>
+
+    <section>
+      <h2>Resumen</h2>
+      <p id="summary" class="hint"></p>
+      <p id="dirInfo" class="hint"></p>
+    </section>
+
+    <section>
+      <h2>Atajos en pantalla completa</h2>
+      <p class="hint">← → otra versión · Enter elegir · X descartar · Espacio pausa · F pantalla completa · Esc cerrar</p>
+    </section>
+  </aside>
+
+  <main id="stage" class="pub-stage">
+    <div class="pub-head">
+      <h2>Fuentes</h2>
+      <button id="refresh" type="button">Actualizar</button>
+    </div>
+    <div id="groups" class="groups"></div>
+  </main>
+
+  <div id="viewer" class="viewer" hidden>
+    <video id="vVideo" playsinline loop></video>
+    <div class="viewer-side">
+      <div id="vPos" class="v-pos"></div>
+      <h2 id="vTitle"></h2>
+      <p id="vInfo" class="v-info"></p>
+      <p id="vDesc" class="v-desc"></p>
+      <div class="v-actions">
+        <button id="vChoose" class="primary">Elegir (Enter)</button>
+        <button id="vDiscard">Descartar (X)</button>
+        <a id="vRefine" class="button" href="#">Refinar</a>
+      </div>
+      <div class="v-nav">
+        <button id="vPrev">← Anterior</button>
+        <button id="vNext">Siguiente →</button>
+      </div>
+      <button id="vClose" class="v-close" title="Cerrar (Esc)">✕</button>
+    </div>
+  </div>
+
+  <script src="templates.js"></script>
+  <script src="revisar.js"></script>
+</body>
+</html>

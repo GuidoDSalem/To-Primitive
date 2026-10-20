@@ -46,6 +46,11 @@
 
 .stale { color: #f2b45c; }
 
+/* Refining a generated version. */
+.refine-bar { margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--accent); background: #6aa8ff1a; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.refine-bar strong { overflow-wrap: anywhere; }
+.refine-bar a { color: var(--accent); }
+
 /* Template cards: a small 9:16 preview each. */
 .tpl-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .tpl { display: flex; flex-direction: column; gap: 4px; padding: 4px; text-align: left; }
