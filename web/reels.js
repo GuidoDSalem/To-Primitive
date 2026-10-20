@@ -334,12 +334,12 @@ const live = {
   g: null,        // current run of the session
   img: null,      // { width, height, background, shapes, scores, baseScore }
   running: false, count: 0, paused: false,
-  runKey: null,   // params() the current run is known to follow
-  sentKey: null,  // params() last sent
-  waitG: null,    // after a restarting change: the old run, until a new one starts
+  runKey: null,   // parameters the session says it's using (from its own events)
+  sentKey: null,  // parameters last sent (to skip repeated sends)
 };
-const paramsKey = () => JSON.stringify(params());
-const algoKey = (k) => { const p = JSON.parse(k); delete p.shapes; return JSON.stringify(p); };
+// Shape parameters as a comparable string, from params() or from a session event.
+const keyOf = (p) => JSON.stringify([p.shapes, p.mode, p.alpha, p.repeat, p.inputSize, p.background || ""]);
+const paramsKey = () => keyOf(params());
 
 function testTime() {
   return reel.kind === "video" ? clamp(+$("testFrame").value, reel.portion.start, reel.portion.end) : 0;
@@ -352,7 +352,7 @@ function closeLive() {
     // Free the CPU: the server drops old sessions by itself later.
     api(`/api/sessions/${live.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: true }) }).catch(() => {});
   }
-  Object.assign(live, { token: live.token + 1, id: null, es: null, key: null, g: null, img: null, running: false, count: 0, runKey: null, sentKey: null, waitG: null });
+  Object.assign(live, { token: live.token + 1, id: null, es: null, key: null, g: null, img: null, running: false, count: 0, runKey: null, sentKey: null });
 }
 
 // The framed photo as a JPEG (the session works on exactly that).
@@ -395,15 +395,15 @@ async function startLive() {
   }
   if (token !== live.token) return; // superseded meanwhile
   live.id = d.id;
-  live.sentKey = live.runKey = paramsKey();
+  live.sentKey = keyOf(p);
   const es = new EventSource(`/api/sessions/${d.id}/events`);
   live.es = es;
+  // Every snapshot and status carries the parameters the session is using:
+  // that (not the order in which answers arrive) says whether its shapes
+  // are the ones the controls ask for.
   es.addEventListener("snapshot", (e) => {
     const s = JSON.parse(e.data);
-    if (live.waitG !== null && s.g !== live.waitG) {
-      live.waitG = null;
-      live.runKey = live.sentKey;
-    }
+    live.runKey = keyOf(s.params);
     live.g = s.g;
     live.img = { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore, shapes: s.data.slice(), scores: s.scores.slice() };
     live.running = s.running;
@@ -422,10 +422,13 @@ async function startLive() {
   es.addEventListener("status", (e) => {
     const s = JSON.parse(e.data);
     if (s.g !== live.g) return;
+    live.runKey = keyOf(s.params);
     live.running = s.running;
     live.count = s.count;
     liveChanged();
   });
+  // The controls may have changed while the session was being created.
+  if (paramsKey() !== live.sentKey) sendParams();
 }
 
 // Reframing or another test frame needs a new session (once the hand stops).
@@ -442,17 +445,15 @@ function sendParams() {
   if (!live.id) return;
   clearTimeout(paramsTimer);
   paramsTimer = setTimeout(async () => {
+    paramsTimer = 0;
     const id = live.id, key = paramsKey();
     if (!id || key === live.sentKey) return;
-    const restarts = algoKey(key) !== algoKey(live.sentKey);
     live.sentKey = key;
     try {
       await api(`/api/sessions/${id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: live.paused }) });
-    } catch { return; }
-    if (id !== live.id || key !== live.sentKey) return;
-    if (restarts) live.waitG = live.g; // the new run announces itself with a snapshot
-    else live.runKey = key;
-    liveChanged();
+    } catch {
+      if (id === live.id && live.sentKey === key) live.sentKey = null; // try again on the next change
+    }
   }, 120);
 }
 
@@ -461,8 +462,11 @@ function sendParams() {
 let liveDraw = 0;
 function liveChanged() {
   const target = params().shapes;
+  // Safety net: the session follows other parameters and nothing is on its
+  // way to fix it (e.g. a send failed): send them again.
+  if (live.id && live.runKey && live.runKey !== paramsKey() && live.sentKey !== paramsKey() && !paramsTimer) sendParams();
   if (reel.kind === "image" && live.img && !live.running && live.count >= target &&
-      live.key === liveImageKey() && live.runKey === paramsKey() && live.waitG === null) {
+      live.key === liveImageKey() && live.runKey === paramsKey()) {
     const key = genKey();
     if (reel.gen?.key !== key) {
       const im = live.img;
