@@ -63,6 +63,10 @@ func TestEditQueued(t *testing.T) {
 	}
 
 	before := names(q)
+	versions := map[string]string{}
+	for _, it := range q {
+		versions[it.Name] = it.Version
+	}
 	*now = now.Add(time.Minute)
 	// What the browser has of the video before the edit.
 	videoURL := ts.URL + "/api/publish/queue/" + url.PathEscape("mona · en.mp4") + "/video"
@@ -91,6 +95,9 @@ func TestEditQueued(t *testing.T) {
 		if it.Name == "mona · en.mp4" && it.Title != "T en" {
 			t.Errorf("title %q", it.Title)
 		}
+		if changed := it.Version != versions[it.Name]; changed != (it.Name == "mona · en.mp4") {
+			t.Errorf("%s: version %s → %s", it.Name, versions[it.Name], it.Version)
+		}
 	}
 	side := readSidecar(filepath.Join(pub.dir, "mona · en.mp4"))
 	if s, _ := json.Marshal(side["settings"]); string(s) != `{"lang":"en","phrases":[{"role":"title","text":"hello"}]}` || side["edited"] == nil {
@@ -101,6 +108,11 @@ func TestEditQueued(t *testing.T) {
 	body, ct = multipartBody(t, map[string]string{"video": video, "audio": song}, map[string]string{"queue": "mona · es.mp4", "meta": `{"lang":"es","audio":{"mode":"file","name":"mi canción.wav","start":0.5}}`})
 	if r, err := http.Post(ts.URL+"/api/reels/mux", ct, body); err != nil || r.StatusCode != 200 {
 		t.Fatalf("mux with a song: %v %v", err, r.Status)
+	}
+	for _, it := range pub.Overview().Queue {
+		if it.Name == "mona · es.mp4" && strings.Contains(strings.Join(it.Warnings, " "), "sonido") {
+			t.Errorf("with its song: %v", it.Warnings)
+		}
 	}
 	audio, _ := readSidecar(filepath.Join(pub.dir, "mona · es.mp4"))["settings"].(map[string]any)["audio"].(map[string]any)
 	kept, _ := audio["kept"].(string)
@@ -116,6 +128,13 @@ func TestEditQueued(t *testing.T) {
 		t.Error("served outside the kept files")
 	}
 
+	body, ct = multipartBody(t, map[string]string{"video": video}, map[string]string{"queue": "mona · en.mp4", "meta": `{"lang":"en","audio":{"mode":"file","name":"x.wav"}}`})
+	http.Post(ts.URL+"/api/reels/mux", ct, body) // no audio field: a silent video
+	for _, it := range pub.Overview().Queue {
+		if it.Name == "mona · en.mp4" && !strings.Contains(strings.Join(it.Warnings, " "), "no tiene sonido") {
+			t.Errorf("silent but with a song in its record: %v", it.Warnings)
+		}
+	}
 	body, ct = multipartBody(t, map[string]string{"video": video}, map[string]string{"queue": "no está.mp4"})
 	if r, _ := http.Post(ts.URL+"/api/reels/mux", ct, body); r.StatusCode != http.StatusNotFound {
 		t.Errorf("replacing a missing video: %d", r.StatusCode)

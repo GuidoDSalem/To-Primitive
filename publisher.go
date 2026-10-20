@@ -164,6 +164,7 @@ type PubItem struct {
 	PublishedAt *time.Time `json:"publishedAt,omitempty"`
 	Result      string     `json:"result,omitempty"`
 	Brand       string     `json:"brand,omitempty"`      // the reel's brand (its record), e.g. @account
+	Version     string     `json:"version"`              // changes whenever the video or its JSON do (for the browser's cache)
 	Editable    bool       `json:"editable,omitempty"`   // has its settings and source: it can reopen in the reel editor
 	Duplicable  bool       `json:"duplicable,omitempty"` // from the generator: it can be made again in another language
 	Warnings    []string   `json:"warnings,omitempty"`
@@ -254,11 +255,17 @@ func writeSidecar(path string, m map[string]any) error {
 func (p *publisher) item(path string, fi os.FileInfo) PubItem {
 	name := fi.Name()
 	it := PubItem{Name: name, Size: fi.Size(), Modified: fi.ModTime()}
-	key := fmt.Sprintf("%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
+	// An edited reel keeps its date: its JSON's date tells the versions apart.
+	it.Version = fmt.Sprintf("%x-%x", fi.Size(), fi.ModTime().UnixNano())
+	if si, err := os.Stat(sidecarOf(path)); err == nil {
+		it.Version += fmt.Sprintf("-%x", si.ModTime().UnixNano())
+	}
+	key := path + "|" + it.Version
 	info, ok := p.probe[key]
 	if !ok {
 		var err error
 		if info, err = probeMedia(context.Background(), path); err == nil {
+			info.Audio, _ = hasAudio(context.Background(), path)
 			p.probe[key] = info
 		}
 	}
@@ -287,6 +294,9 @@ func (p *publisher) item(path string, fi os.FileInfo) PubItem {
 	}
 	it.Result, _ = m["result"].(string)
 	if s, ok := m["settings"].(map[string]any); ok {
+		if a, _ := s["audio"].(map[string]any); a != nil && a["mode"] != nil && a["mode"] != "none" && !info.Audio && info.Duration > 0 {
+			it.Warnings = append(it.Warnings, "no tiene sonido, aunque se armó con sonido: abrilo con Editar reel y guardalo de nuevo")
+		}
 		it.Brand, _ = s["brand"].(string)
 		it.Brand = strings.TrimSpace(it.Brand)
 		src, _ := m["source"].(string)

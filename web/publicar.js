@@ -130,7 +130,7 @@ function itemCard(it, i, published) {
   card.className = "item" + (it.skipped ? " skipped" : "");
   const pos = Object.assign(document.createElement("div"), { className: "pos", textContent: published ? "✓" : i + 1 });
   const video = document.createElement("video");
-  video.src = `/api/publish/${published ? "published" : "queue"}/${enc(it.name)}/video#t=${Math.min(1, it.duration / 2).toFixed(1)}`;
+  video.src = `/api/publish/${published ? "published" : "queue"}/${enc(it.name)}/video?v=${it.version}#t=${Math.min(1, it.duration / 2).toFixed(1)}`;
   video.preload = "metadata";
   video.muted = true;
   video.playsInline = true;
@@ -311,7 +311,7 @@ const preview = (() => {
   function render() {
     const it = list[i];
     if (!it) return close();
-    video.src = `/api/publish/${published ? "published" : "queue"}/${enc(it.name)}/video`;
+    video.src = `/api/publish/${published ? "published" : "queue"}/${enc(it.name)}/video?v=${it.version}`;
     video.play().catch(() => {});
     const tags = (it.tags ?? []).map((t) => "#" + t.replace(/^#/, ""));
     $("pvPos").textContent = `${published ? "Publicados" : "Cola"} · ${i + 1} / ${list.length}`;

@@ -102,6 +102,7 @@ func hasAudio(ctx context.Context, path string) (bool, error) {
 type mediaInfo struct {
 	Duration      float64
 	Width, Height int
+	Audio         bool // has a sound track (only filled where asked)
 }
 
 // probeMedia reads a file's duration and video size.
