@@ -1332,7 +1332,7 @@ function refreshUI() {
 
   const comp = composition();
   if (!exporting) {
-    $("export").disabled = !comp;
+    $("export").disabled = !comp || !!$("export").dataset.closed; // closed: a refined reel already sent to the queue
     if (has && !comp) $("expStatus").textContent = reel.kind === "image" ? "Esperá a que estén todas las formas para exportar." : "Calculá el video para poder exportar.";
     else if (has && !$("expStatus").dataset.done) $("expStatus").textContent = `Reel de ${comp.duration.toFixed(1)} s · ${Templates.LIST[comp.id].name} · 1080×1920, 30 fps.`;
   }
@@ -1480,11 +1480,10 @@ $("export").addEventListener("click", async () => {
   const started = performance.now();
   try {
     if (REFINE) {
-      // A generated version: it's saved over itself, ready for the queue.
-      await encodeAndSend(comp, { refine: REFINE }, exporting.signal, setExport);
-      setExport(null, `Versión refinada guardada en ${((performance.now() - started) / 1000).toFixed(1)} s. Volvé a Revisar para mandarla a la cola.`);
+      // The reel in every language, each saved over its version.
+      const done = await saveRefined(exporting.signal);
+      setExport(null, `${done} en ${((performance.now() - started) / 1000).toFixed(1)} s.`);
       $("expStatus").dataset.done = "1";
-      $("refineState").textContent = "· guardada ✓";
       return;
     }
     const entry = await encodeAndSend(comp, { save: "1" }, exporting.signal, setExport);
@@ -1644,6 +1643,81 @@ function restoreRecord(m) {
   reel.touched = new Set([...(m.changedByHand || []), "duration", "shapes", "mode", "build", "phrases"]);
 }
 
+// The same reel in every language: the settings are shared, the phrases'
+// texts belong to each language (kept in phrase.texts while refining).
+const refining = { versions: [], lang: null }; // versions: [{ name, lang }]
+
+function showRefineLangs() {
+  $("refineLangs").replaceChildren(...refining.versions.map((v) => {
+    const b = Object.assign(document.createElement("button"), { type: "button", textContent: v.lang.toUpperCase(), title: v.name });
+    b.classList.toggle("on", v.lang === refining.lang);
+    b.addEventListener("click", () => switchLang(v.lang));
+    return b;
+  }));
+}
+
+function switchLang(lang) {
+  if (lang === refining.lang) return;
+  for (const p of reel.phrases) {
+    p.texts = { ...p.texts, [refining.lang]: p.text };
+    if (p.texts[lang] !== undefined) p.text = p.texts[lang];
+  }
+  refining.lang = lang;
+  reel.lang = lang;
+  renderPhrases();
+  showRefineLangs();
+  refreshUI();
+  if (!player.playing) player.draw();
+}
+
+// Texts of another language's record for these phrases, matched by role.
+function alignTexts(lang, others) {
+  const used = new Set();
+  for (const p of reel.phrases) {
+    const k = (others || []).findIndex((o, i) => !used.has(i) && o.role === p.role);
+    if (k < 0) continue;
+    used.add(k);
+    p.texts = { ...p.texts, [lang]: others[k].text ?? "" };
+  }
+}
+
+// Export every language and (if asked) send them all to the queue.
+async function saveRefined(signal) {
+  const start = refining.lang;
+  const saved = [];
+  try {
+    for (const v of refining.versions) {
+      switchLang(v.lang);
+      const comp = composition();
+      if (!comp) throw new Error("el reel no está listo");
+      await encodeAndSend(comp, { refine: v.name }, signal, (f, text) =>
+        setExport((saved.length + f) / refining.versions.length, `${v.lang.toUpperCase()} (${saved.length + 1} de ${refining.versions.length}): ${text}`));
+      saved.push(v);
+    }
+  } finally {
+    switchLang(start);
+  }
+  let msg = `Guardado en ${saved.map((v) => v.lang.toUpperCase()).join(", ")}`;
+  if ($("refineQueue").checked) {
+    const queued = [];
+    for (const v of saved) {
+      try {
+        await api(`/api/review/${encodeURIComponent(v.name)}/queue`, { method: "POST" });
+        queued.push(v.lang.toUpperCase());
+      } catch (e) {
+        msg += `. ${v.lang.toUpperCase()} no pasó a la cola: ${e.message}`;
+      }
+    }
+    if (queued.length) msg += ` y en la cola de publicación (${queued.join(", ")})`;
+    $("refineState").textContent = "· guardado y en la cola ✓";
+    $("export").dataset.closed = "1"; // they left Generados: nothing more to save here
+  } else {
+    msg += ". Desde Revisar los podés mandar a la cola";
+    $("refineState").textContent = "· guardado ✓";
+  }
+  return msg;
+}
+
 async function runRefine(name) {
   $("refineBar").hidden = false;
   $("refineName").textContent = name;
@@ -1654,6 +1728,15 @@ async function runRefine(name) {
     const src = `/api/review/${encodeURIComponent(name)}/source`;
     await loadFromURL(src, spec.source.name, spec.source.type, spec.source.kind, null);
     restoreRecord(spec.settings || {});
+    // The other languages of the same reel.
+    refining.lang = reel.lang;
+    refining.versions = [{ name, lang: reel.lang }];
+    for (const p of reel.phrases) p.texts = { [reel.lang]: p.text };
+    for (const sib of spec.siblings || []) {
+      refining.versions.push({ name: sib.name, lang: sib.lang });
+      alignTexts(sib.lang, sib.settings?.phrases);
+    }
+    showRefineLangs();
     sendParams();
     restartLiveSoon(); // the restored framing
     refreshUI();

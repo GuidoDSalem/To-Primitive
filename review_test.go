@@ -79,9 +79,16 @@ func TestReview(t *testing.T) {
 	for _, v := range m.Versions {
 		stages[v.Name] = v.Stage
 	}
-	if len(m.Versions) != 3 || stages["mona · En qué nivel · es.mp4"] != "chosen" || stages["mona · Revelado · en.mp4"] != "generated" ||
-		len(m.Discarded) != 1 || m.Discarded[0].Name != "mona · Revelado · es.mp4" {
+	// The same template is chosen in English too (nothing chosen there yet).
+	if len(m.Versions) != 2 || stages["mona · En qué nivel · es.mp4"] != "chosen" || stages["mona · En qué nivel · en.mp4"] != "chosen" || len(m.Discarded) != 2 {
 		t.Fatalf("after choose: %v, discarded %+v", stages, m.Discarded)
+	}
+	// The editor gets the other language as a sibling.
+	res, _ = http.Get(ts.URL + "/api/review/" + esc("mona · En qué nivel · es.mp4") + "/spec")
+	var spec struct{ Siblings []struct{ Name, Lang string } }
+	json.NewDecoder(res.Body).Decode(&spec)
+	if len(spec.Siblings) != 1 || spec.Siblings[0].Lang != "en" {
+		t.Errorf("siblings %+v", spec.Siblings)
 	}
 	if _, err := os.Stat(filepath.Join(g.out, discardedDir, "mona · Revelado · es.json")); err != nil {
 		t.Error("discarded JSON not moved")
@@ -125,13 +132,25 @@ func TestReview(t *testing.T) {
 		t.Errorf("publishing queue %+v", q)
 	}
 
-	// Restore a discarded one; discard one by hand.
+	// Restore a discarded one and choose it: English already has its choice,
+	// so only Spanish changes.
+	if res, _ := call("POST", "/api/review/"+esc("mona · Revelado · en.mp4")+"/restore"); res.StatusCode != 200 {
+		t.Errorf("restore: %d", res.StatusCode)
+	}
 	if res, _ := call("POST", "/api/review/"+esc("mona · Revelado · es.mp4")+"/restore"); res.StatusCode != 200 {
 		t.Errorf("restore: %d", res.StatusCode)
 	}
+	_, o = call("POST", "/api/review/"+esc("mona · Revelado · es.mp4")+"/choose")
+	stages = map[string]string{}
+	for _, v := range mona(o).Versions {
+		stages[v.Name] = v.Stage
+	}
+	if stages["mona · Revelado · es.mp4"] != "chosen" || stages["mona · En qué nivel · en.mp4"] != "chosen" || stages["mona · Revelado · en.mp4"] != "generated" {
+		t.Errorf("choosing again: %v", stages)
+	}
 	_, o = call("POST", "/api/review/"+esc("mona · Revelado · en.mp4")+"/discard")
-	if m := mona(o); len(m.Versions) != 2 || len(m.Discarded) != 1 {
-		t.Errorf("after restore and discard: %d versions, %d discarded", len(m.Versions), len(m.Discarded))
+	if m := mona(o); len(m.Versions) != 2 {
+		t.Errorf("after discarding: %d versions", len(m.Versions))
 	}
 	if res, _ := call("POST", "/api/review/"+esc("../x.mp4")+"/choose"); res.StatusCode != 400 && res.StatusCode != 404 {
 		t.Errorf("path outside: %d", res.StatusCode)

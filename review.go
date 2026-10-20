@@ -166,7 +166,9 @@ func moveVersion(from, toDir string) error {
 }
 
 // Choose keeps this version for its source and language and discards the
-// others of the same source and language (not yet refined ones too).
+// others of the same source and language. The languages with nothing
+// chosen yet get the same template chosen too: a reel is one piece with a
+// version per language (another template can still be chosen for one).
 func (g *generator) Choose(name string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -175,21 +177,55 @@ func (g *generator) Choose(name string) error {
 		return err
 	}
 	me := reviewItem(PubItem{Name: name}, readSidecar(path))
+	type version struct {
+		path string
+		item ReviewItem
+	}
+	var others []version
+	decided := map[string]bool{} // languages with a version chosen or refined
 	entries, _ := os.ReadDir(g.out)
 	for _, e := range entries {
 		if e.IsDir() || !validName(e.Name()) || e.Name() == name {
 			continue
 		}
-		other := filepath.Join(g.out, e.Name())
-		o := reviewItem(PubItem{Name: e.Name()}, readSidecar(other))
-		if o.Source == me.Source && o.Lang == me.Lang {
-			if err := moveVersion(other, filepath.Join(g.out, discardedDir)); err != nil {
+		p := filepath.Join(g.out, e.Name())
+		o := reviewItem(PubItem{Name: e.Name()}, readSidecar(p))
+		if o.Source != me.Source {
+			continue
+		}
+		others = append(others, version{p, o})
+		if o.Stage != stageGenerated && o.Lang != me.Lang {
+			decided[o.Lang] = true
+		}
+	}
+	// The same template in the undecided languages.
+	chosen := map[string]string{me.Lang: name}
+	for _, o := range others {
+		if o.item.Lang != me.Lang && !decided[o.item.Lang] && o.item.Template == me.Template && chosen[o.item.Lang] == "" {
+			chosen[o.item.Lang] = o.item.Name
+		}
+	}
+	for _, o := range others {
+		pick, ok := chosen[o.item.Lang]
+		switch {
+		case !ok: // a language decided before, or without this template: left as is
+		case o.item.Name == pick:
+			if o.item.Stage == stageGenerated {
+				g.setStage(o.path, stageChosen)
+			}
+		default:
+			if err := moveVersion(o.path, filepath.Join(g.out, discardedDir)); err != nil {
 				return err
 			}
 		}
 	}
+	langs := make([]string, 0, len(chosen))
+	for l := range chosen {
+		langs = append(langs, l)
+	}
+	sort.Strings(langs)
+	g.logLocked(name, "elegido", fmt.Sprintf("%s en %s; las demás versiones de esos idiomas pasan a %s/", templateNames[me.Template], strings.Join(langs, ", "), discardedDir))
 	if me.Stage == stageGenerated {
-		g.logLocked(name, "elegido", "las demás versiones de "+me.Source+" ("+me.Lang+") pasan a "+discardedDir+"/")
 		return g.setStage(path, stageChosen)
 	}
 	return nil
@@ -359,10 +395,25 @@ func (srv *server) reviewSpec(w http.ResponseWriter, r *http.Request, g *generat
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	// The same reel in the other languages (same source and template):
+	// refining applies to all of them.
+	siblings := []map[string]any{}
+	entries, _ := os.ReadDir(g.out)
+	for _, e := range entries {
+		if e.IsDir() || !validName(e.Name()) || e.Name() == name {
+			continue
+		}
+		sd := readSidecar(filepath.Join(g.out, e.Name()))
+		o := reviewItem(PubItem{Name: e.Name()}, sd)
+		if o.Source == it.Source && o.Template == it.Template && o.Lang != it.Lang && o.Stage != stageGenerated {
+			siblings = append(siblings, map[string]any{"name": o.Name, "lang": o.Lang, "stage": o.Stage, "settings": sd["settings"]})
+		}
+	}
 	writeJSON(w, map[string]any{
 		"name": name, "lang": it.Lang, "template": it.Template, "stage": it.Stage, "title": side["title"],
 		"source":   map[string]string{"name": it.Source, "type": mime.TypeByExtension(strings.ToLower(filepath.Ext(it.Source))), "kind": sourceKind(it.Source)},
 		"settings": side["settings"],
+		"siblings": siblings,
 	})
 }
 
