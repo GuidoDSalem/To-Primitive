@@ -154,6 +154,8 @@ En el navegador, con cámara simulada en Chrome:
    | **Comparativa** | Foto o video | Arriba el original, abajo las formas armándose, con una línea entre los dos. Cada mitad es un recorte 9:8, así que las formas se calculan sobre ese recorte |
    | **Cortina** | Foto o video | Una línea va y viene: a un lado el original, al otro las formas. Es periódica, así que también empalma |
    | **Contador** | Foto | Las formas se suman con un contador grande ("{n} {tipo}") y al final aparece la foto |
+   | **Mosaico de niveles** | Foto o video | Grilla 2×2 con cada vez más formas (por ejemplo 10, 50, 100 y 500), los cuadros aparecen uno tras otro y al final todo pasa al original. Sale de un solo cálculo: cada cuadro usa las primeras N formas |
+   | **¿Cuál preferís?** | Foto | La misma foto con cuatro tipos de forma (triángulos, círculos, rectángulos y polígonos) armándose a la vez, numerados para que comenten. Cada tipo es un cálculo propio: mientras este template está elegido corren tres sesiones extra (la del tipo elegido en los controles se reutiliza), y el estado muestra cuántas están listas |
 
    *Automático* elige Revelado para fotos y Video en formas para videos.
 

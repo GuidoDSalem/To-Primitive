@@ -155,17 +155,132 @@ const portionFactor = () => (templateId() === "loop" ? 2 : 1);
 // The template applied to the generated shapes, or null when there's
 // nothing (current) to show. Cached per shapes, template and duration.
 function composition(id = templateId()) {
-  if (!reel.gen || stale() || !Templates.LIST[id].kinds.includes(reel.kind)) return null;
+  const spec = Templates.LIST[id];
+  if (!reel.gen || stale() || !spec.kinds.includes(reel.kind)) return null;
+  // Templates with several kinds of shapes need all of them computed.
+  const vs = spec.variants ? variantImages(spec.variants) : null;
+  if (spec.variants && !vs) return null;
   const build = buildOpts(), interp = $("interp").value;
-  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp]);
+  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp, vs ? variants.version : 0]);
   const cache = (reel.gen.comps ??= new Map());
   if (!cache.has(key)) {
     cache.set(key, Templates.make(id, {
-      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, duration: reelSeconds(), build, interp,
+      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, variants: vs, duration: reelSeconds(), build, interp,
       paintOriginal: (ctx, x, y, w, h) => paintOriginal(ctx, w, h, true, x, y),
     }));
   }
   return cache.get(key);
+}
+
+// ---------- variants: the same photo with other kinds of shapes ----------
+
+// For templates like "¿Cuál preferís?": one session per extra kind of
+// shape, with the same photo, framing and parameters (the editor's own
+// session covers the kind chosen in the controls). They run only while
+// such a template is chosen.
+const variants = { list: new Map(), version: 0, timer: 0 }; // mode -> { key, id, es, img, count, running, done }
+const variantKey = (mode) => JSON.stringify({ image: liveImageKey(), params: { ...params(), mode } });
+
+function wantedVariants() {
+  const spec = Templates.LIST[templateId()];
+  return reel.kind === "image" && spec?.variants ? spec.variants.filter((m) => m !== params().mode) : [];
+}
+
+// The shapes of each kind, in order, or null while any is missing.
+function variantImages(modes) {
+  const target = params().shapes;
+  const out = [];
+  for (const mode of modes) {
+    if (mode === params().mode) {
+      out.push({ mode, image: reel.gen.image });
+      continue;
+    }
+    const v = variants.list.get(mode);
+    if (!v?.done || v.key !== variantKey(mode)) return null;
+    out.push({ mode, image: { ...v.img, shapes: v.img.shapes.slice(0, target), scores: v.img.scores.slice(0, target) } });
+  }
+  return out;
+}
+
+function closeVariant(v) {
+  v.es?.close();
+  if (v.id) api(`/api/sessions/${v.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), mode: v.mode, paused: true }) }).catch(() => {});
+}
+function closeVariants() {
+  for (const v of variants.list.values()) closeVariant(v);
+  variants.list.clear();
+}
+
+// Start, restart or stop sessions so they match what the template needs
+// now (once the hand stops).
+function syncVariantsSoon() {
+  const want = wantedVariants();
+  const ok = want.length === variants.list.size && want.every((m) => variants.list.get(m)?.key === variantKey(m));
+  if (ok || variants.timer) return;
+  variants.timer = setTimeout(syncVariants, 400);
+}
+function syncVariants() {
+  variants.timer = 0;
+  const want = new Set(wantedVariants());
+  for (const [mode, v] of variants.list) {
+    if (!want.has(mode) || v.key !== variantKey(mode)) {
+      closeVariant(v);
+      variants.list.delete(mode);
+    }
+  }
+  for (const mode of want) if (!variants.list.has(mode)) startVariant(mode);
+}
+
+async function startVariant(mode) {
+  const p = { ...params(), mode };
+  const v = { mode, key: variantKey(mode), id: null, es: null, img: null, count: 0, running: true, done: false };
+  variants.list.set(mode, v);
+  let d;
+  try {
+    const form = new FormData();
+    form.append("image", await framedPhoto(), "reel.jpg");
+    form.append("params", JSON.stringify(p));
+    d = await api("/api/sessions", { method: "POST", body: form });
+  } catch {
+    variants.list.delete(mode);
+    return;
+  }
+  if (variants.list.get(mode) !== v) { // replaced meanwhile
+    closeVariant({ ...v, id: d.id });
+    return;
+  }
+  v.id = d.id;
+  let g = null;
+  const check = () => {
+    if (!v.done && v.img && !v.running && v.count >= p.shapes) {
+      v.done = true;
+      variants.version++;
+    }
+    liveChanged();
+  };
+  v.es = new EventSource(`/api/sessions/${d.id}/events`);
+  v.es.addEventListener("snapshot", (e) => {
+    const s = JSON.parse(e.data);
+    g = s.g;
+    v.img = { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore, shapes: s.data.slice(), scores: s.scores.slice() };
+    v.count = s.data.length;
+    v.running = s.running;
+    check();
+  });
+  v.es.addEventListener("shape", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== g || !v.img) return;
+    v.img.shapes[s.i] = s.data;
+    v.img.scores[s.i] = s.score;
+    v.count = Math.max(v.count, s.i + 1);
+  });
+  v.es.addEventListener("status", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== g) return;
+    v.count = s.count;
+    v.running = s.running;
+    check();
+  });
 }
 
 // A full frame of the reel at time t: framed content plus texts.
@@ -910,6 +1025,7 @@ async function loadSource(file) {
   }
   reel.generating?.cancel();
   closeLive();
+  closeVariants();
   player.pause();
   if (reel.url) URL.revokeObjectURL(reel.url);
   Object.assign(reel, { kind: null, name: file.name, url: URL.createObjectURL(file), img: null, video: null, gen: null, shown: false });
@@ -1168,7 +1284,13 @@ function refreshUI() {
     $("liveStatus").textContent = !live.id ? "Preparando…"
       : `Formas: ${n} / ${target} · ` + (live.paused ? "en pausa" : live.running ? "buscando…" : n >= target ? "listas" : "detenido") +
         (reel.kind === "image" && reel.gen && !stale() ? " · el reel ya las usa" : "");
+    const want = wantedVariants();
+    if (want.length) {
+      const done = want.filter((m) => variants.list.get(m)?.done && variants.list.get(m).key === variantKey(m)).length;
+      $("liveStatus").textContent += ` · otros tipos de forma: ${done} / ${want.length} listos`;
+    }
   }
+  syncVariantsSoon();
 
   // Template and duration.
   const tpl = Templates.LIST[templateId()];

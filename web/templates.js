@@ -89,6 +89,32 @@ const Templates = (() => {
       },
       make: makeCounter,
     },
+    mosaic: {
+      name: "Mosaico de niveles", kinds: ["image", "video"], aspect: 9 / 16,
+      desc: "Cuatro cuadros con cada vez más formas (10, 50, 100… todas) y al final el original.",
+      base: {
+        duration: 12, shapes: 500, mode: 1, build: BUILD,
+        phrases: [
+          phrase("question", "¿Cuántas formas hacen falta?", 0.01, 0.8, "top", "question"),
+          closing(0.86, 1, "¿Con cuál la reconociste? 👇"),
+        ],
+      },
+      make: makeMosaic,
+    },
+    prefer: {
+      name: "¿Cuál preferís?", kinds: ["image"], aspect: 9 / 16,
+      // Each kind of shape is a computation of its own.
+      variants: [1, 4, 2, 8],
+      desc: "La misma foto con cuatro tipos de forma (triángulos, círculos, rectángulos, polígonos) armándose a la vez.",
+      base: {
+        duration: 12, shapes: 150, mode: 1, build: BUILD,
+        phrases: [
+          phrase("question", "¿Cuál te gusta más?", 0.01, 0.7, "top", "question", { extend: true }),
+          closing(0.72, 1, "Comentá 1, 2, 3 o 4 👇"),
+        ],
+      },
+      make: makePrefer,
+    },
   };
   const auto = (kind) => (kind === "video" ? "shapes" : "reveal");
 
@@ -353,6 +379,95 @@ const Templates = (() => {
       paint(ctx, t, w, h) {
         plan.render(ctx, t, w, h);
         overlay(ctx, smooth((t - F) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
+      },
+    };
+  }
+
+  // ---------- grids ----------
+
+  // The four cells of a 2x2 grid over w x h, with a thin gap.
+  function cells(w, h) {
+    const g = Math.max(1, Math.round(w * 0.006)), cw = (w - g) / 2, ch = (h - g) / 2;
+    return [[0, 0], [cw + g, 0], [0, ch + g], [cw + g, ch + g]].map(([x, y], i) => ({ x, y, w: cw, h: ch, i }));
+  }
+
+  // A small label hugging the center of the grid (out of the apps' zones):
+  // under the top cells, over the bottom ones.
+  function cellLabel(ctx, c, text, H, alpha) {
+    if (alpha <= 0.002) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const size = Math.round(H * 0.024);
+    ctx.font = `800 ${size}px ${FONT}`;
+    const tw = ctx.measureText(text).width + size * 1.1, th = size * 1.5;
+    const x = c.x + c.w / 2, y = c.i < 2 ? c.y + c.h - th - H * 0.012 : c.y + H * 0.012;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.beginPath();
+    ctx.roundRect(x - tw / 2, y, tw, th, size * 0.4);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x, y + th / 2);
+    ctx.restore();
+  }
+
+  // Nice counts between 10 and n for the mosaic (10, 50, 100, n...).
+  function mosaicCounts(n) {
+    if (n <= 12) return [1, Math.max(1, Math.round(n / 4)), Math.max(1, Math.round(n / 2)), n];
+    const nice = (x) => {
+      const k = 10 ** Math.floor(Math.log10(x));
+      return [1, 2, 2.5, 5, 10].map((m) => m * k).reduce((a, b) => (Math.abs(Math.log(b / x)) < Math.abs(Math.log(a / x)) ? b : a));
+    };
+    return [0, 1, 2, 3].map((i) => (i === 3 ? n : Math.min(n, nice(10 * (n / 10) ** (i / 3)))));
+  }
+
+  // Cells with more and more shapes, appearing one after the other; at the
+  // end the whole frame fades to the original.
+  function makeMosaic(src, b, interp) {
+    const D = lengthOf(src), counts = mosaicCounts(shapeCount(src)), scratch = new Map();
+    const stagger = 0.12 * D, R = 0.82 * D, X = clamp(0.08 * D, 0.5, 1.5);
+    const shown = (i, t) => smooth((t - 0.2 - i * stagger) / 0.6);
+    return {
+      duration: D, videoTime: src.kind === "video" ? (t) => t : () => null, originalFrom: R,
+      paint(ctx, t, w, h) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, w, h);
+        for (const c of cells(w, h)) {
+          const a = shown(c.i, t);
+          if (a <= 0) continue;
+          ctx.globalAlpha = a;
+          inRect(ctx, c.x, c.y, c.w, c.h, scratch, (g, gw, gh) => (src.kind === "image"
+            ? drawShapes(g, src.image, gw, gh, counts[c.i])
+            : Motion.render(g, src.anim, t, interp, gw, gh, counts[c.i])));
+          ctx.globalAlpha = 1;
+          cellLabel(ctx, c, `${counts[c.i]} formas`, h, a * (1 - smooth((t - R) / X)));
+        }
+        overlay(ctx, smooth((t - R) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
+      },
+    };
+  }
+
+  // The same photo with four kinds of shapes, building at the same time.
+  function makePrefer(src, b) {
+    const D = src.duration, scratch = new Map();
+    const plans = src.variants.map((v) => Build.plan(v.image, {
+      direction: "build", order: b.order, curve: b.curve, effect: b.effect,
+      effectTime: Math.min(b.effectTime, D * 0.15), duration: 0.55 * D, holdStart: 0.3, holdEnd: D,
+    }));
+    const names = src.variants.map((v, i) => `${i + 1} · ${SHAPE_NAMES[v.mode][0].toUpperCase()}${SHAPE_NAMES[v.mode].slice(1)}`);
+    return {
+      duration: D, videoTime: () => null, originalFrom: Infinity,
+      paint(ctx, t, w, h) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, w, h);
+        for (const c of cells(w, h)) {
+          inRect(ctx, c.x, c.y, c.w, c.h, scratch, (g, gw, gh) => plans[c.i].render(g, t, gw, gh));
+          cellLabel(ctx, c, names[c.i], h, smooth((t - 0.3) / 0.5));
+        }
       },
     };
   }
