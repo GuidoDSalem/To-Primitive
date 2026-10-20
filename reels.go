@@ -323,9 +323,10 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	meta := srv.keepAudio(r, audio, json.RawMessage(r.FormValue("meta")))
 	// refine=<name>: a generated version exported again from the editor.
 	if name := r.FormValue("refine"); name != "" && srv.gen != nil {
-		if err := srv.gen.Refine(name, out, json.RawMessage(r.FormValue("meta"))); err != nil {
+		if err := srv.gen.Refine(name, out, meta); err != nil {
 			pubError(w, err)
 			return
 		}
@@ -334,7 +335,7 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 	}
 	// queue=<name>: a queued reel edited again, saved over itself.
 	if name := r.FormValue("queue"); name != "" && srv.pub != nil {
-		if err := srv.pub.Replace(name, out, json.RawMessage(r.FormValue("meta"))); err != nil {
+		if err := srv.pub.Replace(name, out, meta); err != nil {
 			pubError(w, err)
 			return
 		}
@@ -343,7 +344,7 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 	}
 	// job=<id>: a reel the generator asked for (saved in its output folder).
 	if job := r.FormValue("job"); job != "" && srv.gen != nil {
-		name, err := srv.gen.Complete(job, out, json.RawMessage(r.FormValue("meta")))
+		name, err := srv.gen.Complete(job, out, meta)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -353,7 +354,7 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 	}
 	// lib=<id>: a library reel edited again, saved over itself.
 	if id := r.FormValue("lib"); id != "" {
-		e, err := srv.lib.Replace(r.Context(), id, out, json.RawMessage(r.FormValue("meta")))
+		e, err := srv.lib.Replace(r.Context(), id, out, meta)
 		if err != nil {
 			pubError(w, err)
 			return
@@ -370,7 +371,7 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer f.Close()
-		e, err := srv.lib.Save(r.Context(), f, json.RawMessage(r.FormValue("meta")))
+		e, err := srv.lib.Save(r.Context(), f, meta)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			return

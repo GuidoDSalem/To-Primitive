@@ -150,6 +150,7 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/reels/{id}/queue", srv.withPublisher(srv.reelQueue))
 	mux.HandleFunc("GET /api/reels/{id}/spec", srv.reelSpec)
 	mux.HandleFunc("GET /api/reels/{id}/source", srv.reelSource)
+	mux.HandleFunc("GET /api/reels/files/{hash}/{name}", srv.reelFile)
 
 	mux.HandleFunc("GET /api/publish", srv.withPublisher(srv.pubOverview))
 	mux.HandleFunc("PUT /api/publish/settings", srv.withPublisher(srv.pubSettings))

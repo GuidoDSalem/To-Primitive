@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,6 +81,26 @@ func TestEditQueued(t *testing.T) {
 	if s, _ := json.Marshal(side["settings"]); string(s) != `{"lang":"en","phrases":[{"role":"title","text":"hello"}]}` || side["edited"] == nil {
 		t.Errorf("sidecar %v", side)
 	}
+	// With a song: it's kept, and the record says where, to put it back.
+	song := sine(t, t.TempDir(), "mi canción.wav", 2)
+	body, ct = multipartBody(t, map[string]string{"video": video, "audio": song}, map[string]string{"queue": "mona · es.mp4", "meta": `{"lang":"es","audio":{"mode":"file","name":"mi canción.wav","start":0.5}}`})
+	if r, err := http.Post(ts.URL+"/api/reels/mux", ct, body); err != nil || r.StatusCode != 200 {
+		t.Fatalf("mux with a song: %v %v", err, r.Status)
+	}
+	audio, _ := readSidecar(filepath.Join(pub.dir, "mona · es.mp4"))["settings"].(map[string]any)["audio"].(map[string]any)
+	kept, _ := audio["kept"].(string)
+	if !strings.HasSuffix(kept, "/mi canción.wav") || audio["start"] != 0.5 {
+		t.Fatalf("audio record %v", audio)
+	}
+	res, _ = http.Get(ts.URL + "/api/reels/files/" + strings.TrimPrefix(filepath.Dir(kept), "sources/") + "/" + url.PathEscape("mi canción.wav"))
+	want, _ := os.ReadFile(song)
+	if b, _ := io.ReadAll(res.Body); !bytes.Equal(b, want) {
+		t.Errorf("kept song: %d, %d bytes", res.StatusCode, len(b))
+	}
+	if r, _ := http.Get(ts.URL + "/api/reels/files/xyz/..%2f..%2fetc"); r.StatusCode == 200 {
+		t.Error("served outside the kept files")
+	}
+
 	body, ct = multipartBody(t, map[string]string{"video": video}, map[string]string{"queue": "no está.mp4"})
 	if r, _ := http.Post(ts.URL+"/api/reels/mux", ct, body); r.StatusCode != http.StatusNotFound {
 		t.Errorf("replacing a missing video: %d", r.StatusCode)

@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -151,40 +153,52 @@ func writeEntry(mpath string, e ReelEntry) error {
 	return os.WriteFile(mpath, b, 0o644)
 }
 
-// KeepSource stores the file at path (named name) as the source of reel id.
-func (l *library) KeepSource(id, path, name string) error {
-	if !validSourceName(filepath.Base(name)) {
-		return errors.New("fuente inválida")
-	}
+// keepFile stores a copy of the file at path, named name, under
+// sources/<hash>/ (once per content) and returns where, relative to the
+// library.
+func (l *library) keepFile(path, name string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	h := sha256.New()
 	_, err = io.Copy(h, f)
 	f.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
 	rel := filepath.Join(sourcesDir, hex.EncodeToString(h.Sum(nil))[:16], filepath.Base(name))
 	dest := filepath.Join(l.dir, rel)
-	if _, err := os.Stat(dest); err != nil {
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return err
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		err = saveFile(dest+".part", in)
-		in.Close()
-		if err == nil {
-			err = os.Rename(dest+".part", dest)
-		}
-		if err != nil {
-			os.Remove(dest + ".part")
-			return err
-		}
+	if _, err := os.Stat(dest); err == nil {
+		return rel, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", err
+	}
+	in, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	err = saveFile(dest+".part", in)
+	in.Close()
+	if err == nil {
+		err = os.Rename(dest+".part", dest)
+	}
+	if err != nil {
+		os.Remove(dest + ".part")
+		return "", err
+	}
+	return rel, nil
+}
+
+// KeepSource stores the file at path (named name) as the source of reel id.
+func (l *library) KeepSource(id, path, name string) error {
+	if !validSourceName(filepath.Base(name)) {
+		return errors.New("fuente inválida")
+	}
+	rel, err := l.keepFile(path, name)
+	if err != nil {
+		return err
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -194,6 +208,52 @@ func (l *library) KeepSource(id, path, name string) error {
 	}
 	e.Source = rel
 	return writeEntry(mpath, e)
+}
+
+// keepAudio keeps the song uploaded with a reel (field audio) and notes in
+// its record where (audio.kept), so the editor can put it back when the
+// reel is reopened. Without a song, the record goes as it came.
+func (srv *server) keepAudio(r *http.Request, audioPath string, meta json.RawMessage) json.RawMessage {
+	fh := r.MultipartForm.File["audio"]
+	if len(fh) == 0 || len(meta) == 0 {
+		return meta
+	}
+	var m map[string]any
+	if json.Unmarshal(meta, &m) != nil {
+		return meta
+	}
+	name := filepath.Base(fh[0].Filename)
+	if name == "." || name == "/" || name == "" {
+		name = "audio"
+	}
+	rel, err := srv.lib.keepFile(audioPath, name)
+	if err != nil {
+		log.Printf("reels: the song of a reel wasn't kept: %v", err)
+		return meta
+	}
+	a, _ := m["audio"].(map[string]any)
+	if a == nil {
+		a = map[string]any{}
+	}
+	a["kept"] = filepath.ToSlash(rel)
+	m["audio"] = a
+	b, err := json.Marshal(m)
+	if err != nil {
+		return meta
+	}
+	return b
+}
+
+var keptFile = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// reelFile serves a kept file (a source or a song): /api/reels/files/<hash>/<name>.
+func (srv *server) reelFile(w http.ResponseWriter, r *http.Request) {
+	hash, name := r.PathValue("hash"), r.PathValue("name")
+	if !keptFile.MatchString(hash) || name != filepath.Base(name) || strings.HasPrefix(name, ".") {
+		http.Error(w, "bad file", http.StatusBadRequest)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join(srv.lib.dir, sourcesDir, hash, name))
 }
 
 // sourcePath is the kept source of reel id.

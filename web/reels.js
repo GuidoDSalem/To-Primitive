@@ -1685,7 +1685,8 @@ async function loadFromURL(url, name, type, kind, compatURL) {
   if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
 }
 
-// Put the editor back in the state a reel's record describes.
+// Put the editor back in the state a reel's record describes. Resolves once
+// its song (if it had one) is back too.
 function restoreRecord(m) {
   if (m.template) reel.template = m.template;
   applyBase(true);
@@ -1740,6 +1741,25 @@ function restoreRecord(m) {
   }
   // Everything restored counts as chosen: switching templates keeps it.
   reel.touched = new Set([...(m.changedByHand || []), "duration", "shapes", "mode", "build", "phrases"]);
+  return restoreSong(m.audio);
+}
+
+// The song a reel was saved with (kept by the server: audio.kept).
+async function restoreSong(a) {
+  if (a?.mode !== "file" || !a.kept) return;
+  try {
+    const res = await fetch("/api/reels/files/" + a.kept.split("/").slice(1).map(encodeURIComponent).join("/"));
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const f = new File([blob], a.name || a.kept.split("/").pop(), { type: blob.type });
+    if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
+    Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f) });
+    $("audioName").textContent = f.name;
+    $("audioStart").value = a.start ?? 0;
+  } catch (e) {
+    $("audioName").textContent = `No se pudo recuperar la canción (${a.name}): volvé a elegirla`;
+  }
+  refreshUI();
 }
 
 // The same reel in every language: the settings are shared, the phrases'
@@ -1842,7 +1862,7 @@ async function runRefine(name) {
     $("refineState").textContent = `· ${(spec.lang || spec.settings?.lang || "").toUpperCase()} · ${Templates.LIST[tpl]?.name ?? tpl ?? ""}`;
     const src = `${reelAPI(name)}/source`;
     await loadFromURL(src, spec.source.name, spec.source.type, spec.source.kind, null);
-    restoreRecord(spec.settings || {});
+    await restoreRecord(spec.settings || {});
     // The other languages of the same reel.
     refining.lang = reel.lang;
     refining.versions = [{ name, lang: reel.lang }];
@@ -1901,7 +1921,7 @@ async function runAuto(id) {
     if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
     if (job.record) {
       // A copy of a finished reel: all its settings, texts already translated.
-      restoreRecord(job.record);
+      await restoreRecord(job.record);
       sendParams();
     } else {
       reel.template = job.template;

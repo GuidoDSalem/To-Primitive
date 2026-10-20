@@ -236,7 +236,7 @@ Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`.
 
 El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el título sale de la frase de título (o de la pregunta) con `{formas}` y `{tipo}` completados, y la descripción del cierre más `#Shorts`.
 
-**Editar reel.** Cada reel de la cola que salió del generador (o de Revisar), o de la biblioteca del editor de reels, se puede volver a abrir en el editor de reels con **Editar reel**, con todos sus ajustes y con sus otros idiomas que estén en la cola (mismo origen y template). Igual que al refinar, los cambios valen para todos los idiomas y las frases se editan en cada uno. **Guardar cambios en la cola** vuelve a exportar todos los idiomas y los reemplaza en su mismo lugar de la cola, sin tocar título, descripción ni tags (esos se cambian con **Textos**).
+**Editar reel.** Cada reel de la cola que salió del generador (o de Revisar), o de la biblioteca del editor de reels, se puede volver a abrir en el editor de reels con **Editar reel**, con todos sus ajustes y con sus otros idiomas que estén en la cola (mismo origen y template). Igual que al refinar, los cambios valen para todos los idiomas y las frases se editan en cada uno. **Guardar cambios en la cola** vuelve a exportar todos los idiomas y los reemplaza en su mismo lugar de la cola, sin tocar título, descripción ni tags (esos se cambian con **Textos**). Si el reel tiene una canción elegida por vos, se guarda una copia (en `sources/` de la biblioteca), así que al reabrirlo vuelve con la canción y su punto de inicio; lo mismo al editar desde la biblioteca o refinar.
 
 **Duplicar en otro idioma.** Cada reel de la cola que salió del generador tiene **Duplicar en otro idioma**: elegís el idioma (es, en, pt, fr, it, de u otro código) y un **LLM local** traduce todos los textos —título, descripción, tags y cada frase que aparece en pantalla—, manteniendo `{formas}`, `{tipo}`, los emojis y `#Shorts`. Después se vuelve a renderizar el reel con los mismos ajustes (Chromium en el contenedor) y la copia entra a la cola justo después del original, ya refinada. El avance se ve en "Duplicando en otros idiomas", con **Reintentar** si falla. Usa siempre el modelo local (el de la página Generar, o `LLM_BASE_URL` / `LLM_MODEL`), nunca Claude. No se puede duplicar a un idioma que ya está en la cola, ni un video que no tenga sus ajustes (por ejemplo, uno dejado a mano en la carpeta).
 
@@ -377,6 +377,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/reels` | Lista la biblioteca, del más nuevo al más viejo |
 | `GET /api/reels/{id}/video` | El MP4 de un reel (`?download=1` para descargarlo) |
 | `DELETE /api/reels/{id}` | Borra un reel de la biblioteca (y su origen, si ningún otro reel lo usa) |
+| `GET /api/reels/files/{hash}/{name}` | Un archivo guardado para reabrir reels (origen o canción; su ruta está en el registro, p. ej. `audio.kept`) |
 | `GET /api/reels/{id}/spec` · `GET …/source` | Ajustes y origen, para reabrirlo en el editor (`reels.html?lib=`) |
 | `POST /api/reels/{id}/queue` | Copia un reel de la biblioteca a la carpeta de publicación (con título y descripción) |
 | `GET /api/publish` | Regla, cola (con el horario de cada video), publicados y registro |
