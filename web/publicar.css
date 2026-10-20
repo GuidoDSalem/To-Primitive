@@ -116,3 +116,4 @@ code { font-size: 11px; color: var(--accent); }
 .shorts-caption .cap-title { font-weight: 600; }
 .shorts-caption .cap-desc { opacity: .85; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .v-desc.warn { color: #f2b45c; }
+.item .dup select { width: 100%; }

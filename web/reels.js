@@ -1783,14 +1783,20 @@ async function runAuto(id) {
       await load("?compat", job.source.name.replace(/\.\w+$/, "") + ".webm", "video/webm");
     }
     if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
-    reel.template = job.template;
-    applyBase(true);
-    // The texts written for this language, by phrase role.
-    reel.lang = job.lang || "es";
-    for (const ph of reel.phrases) {
-      if (job.phrases?.[ph.role] !== undefined) ph.text = job.phrases[ph.role];
+    if (job.record) {
+      // A copy of a finished reel: all its settings, texts already translated.
+      restoreRecord(job.record);
+      sendParams();
+    } else {
+      reel.template = job.template;
+      applyBase(true);
+      // The texts written for this language, by phrase role.
+      reel.lang = job.lang || "es";
+      for (const ph of reel.phrases) {
+        if (job.phrases?.[ph.role] !== undefined) ph.text = job.phrases[ph.role];
+      }
+      renderPhrases();
     }
-    renderPhrases();
     restartLiveSoon(); // the template may frame differently
     refreshUI();
     if (reel.kind === "video") {

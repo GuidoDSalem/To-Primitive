@@ -97,6 +97,7 @@ func main() {
 		log.Fatal(err)
 	}
 	srv.gen = gen
+	gen.pub = pub
 	if gen.chrome == "" {
 		log.Printf("generator: no headless browser found (install Chromium or set CHROME_BIN); reels won't be generated")
 	}
@@ -150,6 +151,8 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/publish/queue/{name}/now", srv.withPublisher(srv.pubNow))
 	mux.HandleFunc("GET /api/publish/queue/{name}/video", srv.withPublisher(srv.pubVideo(false)))
 	mux.HandleFunc("POST /api/publish/published/{name}/requeue", srv.withPublisher(srv.pubRequeue))
+	mux.HandleFunc("POST /api/publish/queue/{name}/duplicate", srv.withPublisher(srv.pubDuplicate))
+	mux.HandleFunc("GET /api/publish/copies", srv.withPublisher(srv.pubCopies))
 	mux.HandleFunc("GET /api/publish/published/{name}/video", srv.withPublisher(srv.pubVideo(true)))
 
 	mux.HandleFunc("GET /api/auto", srv.withGenerator(srv.genOverview))

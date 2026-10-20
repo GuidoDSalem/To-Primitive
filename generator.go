@@ -71,19 +71,25 @@ func (s GenSettings) langs() []string {
 }
 
 type GenJob struct {
-	ID       string    `json:"id"`
-	Source   string    `json:"source"` // file name in the input folder
-	Kind     string    `json:"kind"`   // image | video
-	Template string    `json:"template"`
-	Lang     string    `json:"lang"`
-	State    string    `json:"state"` // queued | running | done | error
-	Stage    string    `json:"stage,omitempty"`
-	Progress float64   `json:"progress"`
-	Output   string    `json:"output,omitempty"`
-	Error    string    `json:"error,omitempty"`
-	Created  time.Time `json:"created"`
-	Started  time.Time `json:"started,omitzero"`
-	Finished time.Time `json:"finished,omitzero"`
+	ID       string `json:"id"`
+	Source   string `json:"source"` // file name in the input folder
+	Kind     string `json:"kind"`   // image | video
+	Template string `json:"template"`
+	Lang     string `json:"lang"`
+	// A copy of a queued reel in another language: its texts translated,
+	// the same settings, and the result straight to the publishing queue.
+	Dest     string          `json:"dest,omitempty"`   // "queue" for those
+	From     string          `json:"from,omitempty"`   // the queued reel it copies
+	Record   json.RawMessage `json:"record,omitempty"` // its settings, texts translated once done
+	Copy     *Copy           `json:"copy,omitempty"`   // title, description and tags translated
+	State    string          `json:"state"`            // queued | running | done | error
+	Stage    string          `json:"stage,omitempty"`
+	Progress float64         `json:"progress"`
+	Output   string          `json:"output,omitempty"`
+	Error    string          `json:"error,omitempty"`
+	Created  time.Time       `json:"created"`
+	Started  time.Time       `json:"started,omitzero"`
+	Finished time.Time       `json:"finished,omitzero"`
 }
 
 type genState struct {
@@ -109,6 +115,7 @@ type generator struct {
 	running *exec.Cmd
 	wake    chan struct{}
 	finish  chan string // job ids that ended (done or error)
+	pub     *publisher  // where copies in other languages go
 }
 
 // findChrome returns the headless browser to use: CHROME_BIN, or the usual names.
@@ -254,11 +261,12 @@ func (g *generator) jobLocked(id string) *GenJob {
 func (g *generator) next() *GenJob {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if !g.state.Settings.Enabled {
-		return nil
-	}
 	for _, j := range g.state.Jobs {
-		if j.State == "queued" && g.sourceExistsLocked(j.Source) {
+		// Copies for the queue go even with the generator paused.
+		if !g.state.Settings.Enabled && j.Dest != "queue" {
+			continue
+		}
+		if _, err := g.sourcePath(j.Source); j.State == "queued" && err == nil {
 			j.State, j.Started, j.Stage, j.Progress, j.Error = "running", g.now(), "abriendo el editor", 0, ""
 			g.saveLocked()
 			return j
@@ -270,11 +278,18 @@ func (g *generator) next() *GenJob {
 // run makes one reel: the editor in a headless browser, until the page says
 // it's done, fails, or takes too long.
 func (g *generator) run(ctx context.Context, j *GenJob) {
+	if j.Dest == "queue" {
+		if err := g.translate(ctx, j); err != nil {
+			g.end(j.ID, "", err)
+			return
+		}
+	} else if g.chrome != "" {
+		g.ensureCopy(ctx, j)
+	}
 	if g.chrome == "" {
 		g.end(j.ID, "", errors.New("no hay un navegador para generar (instalá Chromium o definí CHROME_BIN)"))
 		return
 	}
-	g.ensureCopy(ctx, j)
 	profile, _ := os.MkdirTemp("", "to-primitive-chrome-")
 	defer os.RemoveAll(profile)
 	cctx, cancel := context.WithTimeout(ctx, jobTimeout)
@@ -327,6 +342,14 @@ func (g *generator) end(id, output string, failure error) {
 	} else {
 		j.State, j.Output, j.Progress, j.Stage = "done", output, 1, ""
 		g.logLocked(output, "generado", fmt.Sprintf("%s · %s en %.0f s", j.Source, templateNames[j.Template], j.Finished.Sub(j.Started).Seconds()))
+	}
+	if j.Dest == "queue" { // copies don't move their source
+		g.saveLocked()
+		select {
+		case g.finish <- id:
+		default:
+		}
+		return
 	}
 	pending := false
 	for _, o := range g.state.Jobs {
@@ -456,6 +479,10 @@ func (g *generator) Complete(id, reelPath string, meta json.RawMessage) (string,
 	if j == nil || j.State != "running" {
 		g.mu.Unlock()
 		return "", errors.New("ese trabajo no está en curso")
+	}
+	if j.Dest == "queue" {
+		g.mu.Unlock()
+		return g.completeCopy(j, reelPath, meta)
 	}
 	name := g.outputName(j)
 	src, tpl, lang := j.Source, j.Template, j.Lang
@@ -602,7 +629,7 @@ func (g *generator) Retry(id string) error {
 	if j.State != "error" {
 		return errors.New("solo se reintentan los que fallaron")
 	}
-	if !g.sourceExistsLocked(j.Source) {
+	if j.Dest != "queue" && !g.sourceExistsLocked(j.Source) {
 		if err := os.Rename(filepath.Join(g.in, processedDir, j.Source), filepath.Join(g.in, j.Source)); err != nil {
 			return errors.New("la fuente ya no está")
 		}
@@ -660,6 +687,9 @@ func (srv *server) genJob(w http.ResponseWriter, r *http.Request, g *generator) 
 	if j != nil {
 		out = map[string]any{"id": j.ID, "template": j.Template, "kind": j.Kind, "lang": j.Lang,
 			"source": map[string]string{"name": j.Source, "type": mime.TypeByExtension(strings.ToLower(filepath.Ext(j.Source)))}}
+		if j.Record != nil { // a copy: the reel's own settings, texts translated
+			out["record"] = j.Record
+		}
 		// The on-screen texts for this language, by phrase role.
 		if c, ok := g.state.Copies[copyKey(j)][j.Lang]; ok {
 			phrases := map[string]string{"title": c.Hook, "closing": c.Closing}
@@ -688,7 +718,11 @@ func (srv *server) genSource(w http.ResponseWriter, r *http.Request, g *generato
 		http.Error(w, "job not found", http.StatusNotFound)
 		return
 	}
-	path := filepath.Join(g.in, j.Source)
+	path, err := g.sourcePath(j.Source) // in the input folder or already in procesados/
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
 	if r.URL.Query().Has("compat") && j.Kind == "video" {
 		compat := filepath.Join(srv.dataDir, "compat-"+j.ID+".webm")
 		if _, err := os.Stat(compat); err != nil {

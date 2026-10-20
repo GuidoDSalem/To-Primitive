@@ -327,14 +327,22 @@ func (w *localWriter) Name() string { return "modelo local (" + w.model + " en "
 
 func (w *localWriter) Write(ctx context.Context, req CopyRequest) (map[string]LangCopy, error) {
 	schema, _ := json.Marshal(copySchema())
+	// Text only: not every local model sees images.
+	answer, err := w.chat(ctx, "Answer only with a JSON object matching this JSON schema, nothing else:\n"+string(schema), copyPrompt(req), 0.7)
+	if err != nil {
+		return nil, err
+	}
+	return parseCopy(answer, req)
+}
+
+// chat sends one system + user message to the OpenAI-compatible endpoint
+// and returns the answer's text.
+func (w *localWriter) chat(ctx context.Context, system, user string, temperature float64) (string, error) {
 	body, _ := json.Marshal(map[string]any{
-		"model": w.model,
-		"messages": []map[string]any{
-			{"role": "system", "content": "Answer only with a JSON object matching this JSON schema, nothing else:\n" + string(schema)},
-			{"role": "user", "content": copyPrompt(req)}, // text only: not every local model sees images
-		},
+		"model":           w.model,
+		"messages":        []map[string]any{{"role": "system", "content": system}, {"role": "user", "content": user}},
 		"response_format": map[string]any{"type": "json_object"},
-		"temperature":     0.7,
+		"temperature":     temperature,
 		"stream":          false,
 	})
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -346,12 +354,12 @@ func (w *localWriter) Write(ctx context.Context, req CopyRequest) (map[string]La
 	}
 	res, err := http.DefaultClient.Do(hreq)
 	if err != nil {
-		return nil, fmt.Errorf("modelo local: %v", err)
+		return "", fmt.Errorf("modelo local (%s): %v", w.baseURL, err)
 	}
 	defer res.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("modelo local: %s: %s", res.Status, strings.TrimSpace(string(b[:min(len(b), 300)])))
+		return "", fmt.Errorf("modelo local: %s: %s", res.Status, strings.TrimSpace(string(b[:min(len(b), 300)])))
 	}
 	var ans struct {
 		Choices []struct {
@@ -359,9 +367,72 @@ func (w *localWriter) Write(ctx context.Context, req CopyRequest) (map[string]La
 		}
 	}
 	if err := json.Unmarshal(b, &ans); err != nil || len(ans.Choices) == 0 {
-		return nil, errors.New("modelo local: respuesta inesperada")
+		return "", errors.New("modelo local: respuesta inesperada")
 	}
-	return parseCopy(ans.Choices[0].Message.Content, req)
+	return ans.Choices[0].Message.Content, nil
+}
+
+// ---------- translation ----------
+
+// Copy is a reel's texts: what the platforms show and what's on screen.
+type Copy struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
+	Texts       []string `json:"texts"` // the on-screen phrases, in order
+}
+
+// localTranslator is the local model chosen for translations: the
+// generator's if it's a local one, otherwise LLM_BASE_URL / LLM_MODEL.
+func localTranslator(s LLMSettings) *localWriter {
+	if s.Provider != "local" {
+		s = LLMSettings{Provider: "local"}
+	}
+	return newCopywriter(s).(*localWriter)
+}
+
+// Translate puts a reel's copy into another language with a local model.
+// Placeholders ({formas}...), emoji and line breaks stay; every on-screen
+// phrase comes back, in the same order.
+func (w *localWriter) Translate(ctx context.Context, from, to string, c Copy) (Copy, error) {
+	in, _ := json.Marshal(c)
+	system := `You translate the copy of short vertical videos (YouTube Shorts, TikTok, Reels). Answer only with a JSON object with the same keys as the input: {"title": string, "description": string, "tags": [string], "texts": [string]}.`
+	user := fmt.Sprintf("Translate from %s to %s. Write it natively (as a creator in that language would), not word by word. Keep exactly: {placeholders} like {formas} or {nivel}, emoji, line breaks, and the #Shorts hashtag; translate the other hashtags. Tags in lowercase, without '#'. \"texts\" must have exactly %d items, in the same order.\n\n%s",
+		langName(from), langName(to), len(c.Texts), in)
+	answer, err := w.chat(ctx, system, user, 0.3)
+	if err != nil {
+		return Copy{}, err
+	}
+	answer = strings.TrimSpace(answer)
+	if i := strings.Index(answer, "{"); i > 0 {
+		answer = answer[i:]
+	}
+	if i := strings.LastIndex(answer, "}"); i >= 0 {
+		answer = answer[:i+1]
+	}
+	var out Copy
+	if err := json.Unmarshal([]byte(answer), &out); err != nil {
+		return Copy{}, fmt.Errorf("traducción ilegible: %v", err)
+	}
+	if len(out.Texts) != len(c.Texts) {
+		return Copy{}, fmt.Errorf("la traducción devolvió %d frases de %d", len(out.Texts), len(c.Texts))
+	}
+	// Placeholders must survive: the reel fills them in.
+	ph := regexp.MustCompile(`\{\w+\}`)
+	for i, t := range c.Texts {
+		for _, p := range ph.FindAllString(t, -1) {
+			if !strings.Contains(out.Texts[i], p) {
+				return Copy{}, fmt.Errorf("la traducción perdió %s en %q", p, out.Texts[i])
+			}
+		}
+	}
+	if strings.TrimSpace(out.Title) == "" {
+		return Copy{}, errors.New("la traducción vino sin título")
+	}
+	for i, t := range out.Tags {
+		out.Tags[i] = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(t, "#")))
+	}
+	return out, nil
 }
 
 // ---------- rules (no model) ----------

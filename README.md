@@ -234,6 +234,8 @@ Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`.
 
 El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el título sale de la frase de título (o de la pregunta) con `{formas}` y `{tipo}` completados, y la descripción del cierre más `#Shorts`.
 
+**Duplicar en otro idioma.** Cada reel de la cola que salió del generador tiene **Duplicar en otro idioma**: elegís el idioma (es, en, pt, fr, it, de u otro código) y un **LLM local** traduce todos los textos —título, descripción, tags y cada frase que aparece en pantalla—, manteniendo `{formas}`, `{tipo}`, los emojis y `#Shorts`. Después se vuelve a renderizar el reel con los mismos ajustes (Chromium en el contenedor) y la copia entra a la cola justo después del original, ya refinada. El avance se ve en "Duplicando en otros idiomas", con **Reintentar** si falla. Usa siempre el modelo local (el de la página Generar, o `LLM_BASE_URL` / `LLM_MODEL`), nunca Claude. No se puede duplicar a un idioma que ya está en la cola, ni un video que no tenga sus ajustes (por ejemplo, uno dejado a mano en la carpeta).
+
 **La regla.** Horarios (uno o varios por día), días de la semana y zona horaria (por defecto Buenos Aires); por ejemplo, "todos los días a las 19:00". En cada horario se publica el siguiente video de la cola. Los videos se pueden subir o bajar, **saltear** (quedan en la carpeta sin publicarse), **publicar ahora** y, ya publicados, **volver a la cola**. Si el servidor estuvo apagado durante varios horarios, al volver publica uno solo (no una ráfaga). La regla, el orden y el registro se guardan en la propia carpeta (`.cola.json`).
 
 **Por ahora la publicación es simulada:** marca el video y lo mueve a `publicados/`, sin subirlo a ninguna plataforma. Así se prueban la cola y la regla; la subida a YouTube (y después TikTok e Instagram) se conecta en el mismo lugar.
@@ -379,6 +381,8 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/publish/queue/{name}/skip` | Saltear o incluir (`skip`) |
 | `POST /api/publish/queue/{name}/now` | Publicar ya |
 | `POST /api/publish/published/{name}/requeue` | Devolver un publicado a la cola (primero) |
+| `POST /api/publish/queue/{name}/duplicate` | Duplicar en otro idioma (`lang`): traduce con el LLM local y renderiza la copia |
+| `GET /api/publish/copies` | Copias en curso (estado, progreso, error) |
 | `GET /api/auto` | Generador: ajustes, trabajos, reels generados y registro |
 | `PUT /api/auto/settings` | `enabled`, `templates` (vacío = todos), `languages` y `llm` (`provider`: `anthropic`, `local`, `none` o vacío = automático; `model`; `baseURL`) |
 | `GET /api/auto/jobs/{id}` · `/source` | Lo que la página automática necesita: template y fuente (`?compat` = video en WebM) |

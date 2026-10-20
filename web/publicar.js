@@ -171,6 +171,7 @@ function itemCard(it, i, published) {
       button(it.skipped ? "Incluir" : "Saltear", it.skipped ? "Vuelve a la cola" : "Queda en la carpeta sin publicarse",
         () => act(api(`/api/publish/queue/${enc(it.name)}/skip`, { method: "POST", json: { skip: !it.skipped } }))),
       button("Editar", "Título, descripción y etiquetas", () => toggleEdit(card, it)),
+      button("Duplicar en otro idioma", "Traduce los textos con el modelo local y vuelve a generar el reel", () => toggleDuplicate(card, it)),
       button("Publicar ahora", "Sin esperar la regla", () => {
         if (confirm(`¿Publicar "${it.title}" ahora?`)) act(api(`/api/publish/queue/${enc(it.name)}/now`, { method: "POST" }));
       }),
@@ -178,6 +179,68 @@ function itemCard(it, i, published) {
   }
   card.append(pos, video, body, actions);
   return card;
+}
+
+// The reel in another language: a local model translates the texts and the
+// generator draws it again; it joins the queue right after this one.
+const LANGS = { es: "Español", en: "English", pt: "Português", fr: "Français", it: "Italiano", de: "Deutsch" };
+function toggleDuplicate(card, it) {
+  const open = card.querySelector(".dup");
+  if (open) {
+    open.remove();
+    return;
+  }
+  const box = document.createElement("div");
+  box.className = "edit dup";
+  const sel = document.createElement("select");
+  const mine = (it.name.match(/ · ([a-z]{2})\.\w+$/) || [])[1];
+  sel.append(...Object.entries(LANGS).filter(([c]) => c !== mine).map(([c, n]) => new Option(`${n} (${c})`, c)));
+  sel.append(new Option("Otro…", ""));
+  const go = button("Duplicar", "", async () => {
+    let lang = sel.value;
+    if (!lang) lang = (prompt("Código de dos letras del idioma (por ejemplo: ja, ko, ru):") || "").trim().toLowerCase();
+    if (!lang) return;
+    try {
+      await api(`/api/publish/queue/${enc(it.name)}/duplicate`, { method: "POST", json: { lang } });
+      box.replaceChildren(Object.assign(document.createElement("span"), { className: "hint", textContent: `Traduciendo y generando en ${lang.toUpperCase()}… va a aparecer en la cola, después de este.` }));
+      refreshCopies();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  go.className = "primary";
+  box.append(Object.assign(document.createElement("span"), { className: "hint", textContent: "Los textos (en pantalla, título, descripción y tags) los traduce el modelo local." }), sel, go);
+  card.querySelector(".body").append(box);
+}
+
+// Copies in other languages on their way to the queue.
+async function refreshCopies() {
+  let jobs = [];
+  try {
+    jobs = await api("/api/publish/copies");
+  } catch { /* the generator may be off */ }
+  $("copies").hidden = !jobs.length;
+  $("copiesList").replaceChildren(...jobs.map((j) => {
+    const row = document.createElement("div");
+    row.className = "job " + j.state;
+    row.append(
+      Object.assign(document.createElement("div"), { className: "what", textContent: `${j.from} → ${j.lang.toUpperCase()}` }),
+      Object.assign(document.createElement("div"), { className: "state", textContent: j.state === "error" ? "Falló" : j.state === "running" ? j.stage || "Generando" : "En espera" }),
+    );
+    if (j.state === "running") row.append(Object.assign(document.createElement("progress"), { max: 1, value: j.progress || 0 }));
+    if (j.state === "error") {
+      row.append(Object.assign(document.createElement("div"), { className: "err", textContent: j.error }));
+      row.append(button("Reintentar", "", async () => {
+        await api(`/api/auto/jobs/${j.id}/retry`, { method: "POST" }).catch((e) => alert(e.message));
+        refreshCopies();
+      }));
+    }
+    return row;
+  }));
+  // Something finished: show it in the queue.
+  const busy = jobs.some((j) => j.state !== "error");
+  if (refreshCopies.busy && !busy) refresh();
+  refreshCopies.busy = busy;
 }
 
 // Title, description and tags, saved in the JSON next to the video.
@@ -310,3 +373,5 @@ async function refresh() {
 $("refresh").addEventListener("click", refresh);
 refresh();
 setInterval(() => { if (!document.hidden && $("viewer").hidden) refresh(); }, 20000);
+refreshCopies();
+setInterval(() => { if (!document.hidden) refreshCopies(); }, 4000);
