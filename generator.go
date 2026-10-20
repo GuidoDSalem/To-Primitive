@@ -61,6 +61,9 @@ type GenSettings struct {
 	// Versions can go to the publishing queue once chosen, without the
 	// manual refining step (by default it's required).
 	SkipRefine bool `json:"skipRefine"`
+	// Make the default templates of every new source at once, without
+	// asking which to try (by default each source waits for the choice).
+	SkipChoice bool `json:"skipChoice"`
 }
 
 func (s GenSettings) langs() []string {
@@ -92,10 +95,18 @@ type GenJob struct {
 	Finished time.Time       `json:"finished,omitzero"`
 }
 
+// WaitingSource is a new source waiting for its templates to be chosen.
+type WaitingSource struct {
+	Name  string    `json:"name"`
+	Kind  string    `json:"kind"`
+	Added time.Time `json:"added"`
+}
+
 type genState struct {
-	Settings GenSettings   `json:"settings"`
-	Jobs     []*GenJob     `json:"jobs"`
-	Log      []pubLogEntry `json:"log"`
+	Settings GenSettings      `json:"settings"`
+	Jobs     []*GenJob        `json:"jobs"`
+	Waiting  []*WaitingSource `json:"waiting"`
+	Log      []pubLogEntry    `json:"log"`
 	// What was written for each source and template, by language (so all
 	// the languages of a reel share one call to the model).
 	Copies map[string]map[string]LangCopy `json:"copies"`
@@ -211,6 +222,11 @@ func (g *generator) scan() {
 			known[j.Source] = true
 		}
 	}
+	// Waiting ones whose file went away are forgotten.
+	g.state.Waiting = slices.DeleteFunc(g.state.Waiting, func(w *WaitingSource) bool { return !g.sourceExistsLocked(w.Name) })
+	for _, w := range g.state.Waiting {
+		known[w.Name] = true
+	}
 	seen := map[string]string{}
 	for _, e := range entries {
 		name := e.Name()
@@ -231,15 +247,25 @@ func (g *generator) scan() {
 		if !g.state.Settings.Enabled {
 			continue
 		}
-		g.enqueueLocked(name, kind, "fuente nueva")
+		g.addSourceLocked(name, kind, "fuente nueva")
 	}
 	g.seen = seen
 	g.saveLocked()
 }
 
-// enqueueLocked queues a job per template and language for a new source.
-func (g *generator) enqueueLocked(name, kind, why string) {
-	tpls, langs := g.templatesFor(kind), g.state.Settings.langs()
+// addSourceLocked takes a new source: it waits for its templates to be
+// chosen, or (if the settings skip that) gets the default ones now.
+func (g *generator) addSourceLocked(name, kind, why string) {
+	if !g.state.Settings.SkipChoice {
+		g.state.Waiting = append(g.state.Waiting, &WaitingSource{Name: name, Kind: kind, Added: g.now()})
+		g.logLocked(name, why, "esperando que elijas los templates")
+		return
+	}
+	g.enqueueLocked(name, kind, g.templatesFor(kind), g.state.Settings.langs(), why)
+}
+
+// enqueueLocked queues a job per template and language for a source.
+func (g *generator) enqueueLocked(name, kind string, tpls, langs []string, why string) {
 	for _, t := range tpls {
 		for _, l := range langs {
 			g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, Lang: l, State: "queued", Created: g.now()})
@@ -533,23 +559,29 @@ func (g *generator) Progress(id, stage string, fraction float64) {
 
 // GenOverview is what the generator page shows.
 type GenOverview struct {
-	InDir        string        `json:"in"`
-	OutDir       string        `json:"out"`
-	Browser      string        `json:"browser"`
-	Settings     GenSettings   `json:"settings"`
-	Templates    []string      `json:"templates"` // all, in order
-	Jobs         []*GenJob     `json:"jobs"`      // newest first
-	Outputs      []PubItem     `json:"outputs"`   // newest first
-	Log          []pubLogEntry `json:"log"`
-	Publishing   bool          `json:"publishing"` // there's a publishing folder to send them to
-	Writer       string        `json:"writer"`     // who writes the texts now
-	HasClaudeKey bool          `json:"hasClaudeKey"`
+	InDir        string              `json:"in"`
+	OutDir       string              `json:"out"`
+	Browser      string              `json:"browser"`
+	Settings     GenSettings         `json:"settings"`
+	Templates    []string            `json:"templates"` // all, in order
+	ByKind       map[string][]string `json:"byKind"`    // the ones that fit photos and videos
+	Waiting      []*WaitingSource    `json:"waiting"`   // new sources waiting for their templates
+	Jobs         []*GenJob           `json:"jobs"`      // newest first
+	Outputs      []PubItem           `json:"outputs"`   // newest first
+	Log          []pubLogEntry       `json:"log"`
+	Publishing   bool                `json:"publishing"` // there's a publishing folder to send them to
+	Writer       string              `json:"writer"`     // who writes the texts now
+	HasClaudeKey bool                `json:"hasClaudeKey"`
 }
 
 func (g *generator) Overview(probe func(string) []PubItem) GenOverview {
 	g.mu.Lock()
 	o := GenOverview{InDir: hostDir("INPUT_HOST_DIR", g.in), OutDir: hostDir("GENERATED_HOST_DIR", g.out), Browser: g.chrome,
-		Settings: g.state.Settings}
+		Settings: g.state.Settings, ByKind: autoTemplates, Waiting: []*WaitingSource{}}
+	for _, w := range g.state.Waiting {
+		c := *w
+		o.Waiting = append(o.Waiting, &c)
+	}
 	if o.Settings.Templates == nil {
 		o.Settings.Templates = []string{}
 	}
@@ -601,13 +633,7 @@ func (g *generator) SetSettings(s GenSettings) {
 		}
 	}
 	s.Templates = tpls
-	langs := []string{}
-	for _, l := range s.Languages {
-		if l = strings.ToLower(strings.TrimSpace(l)); regexp.MustCompile(`^[a-z]{2}$`).MatchString(l) && !slices.Contains(langs, l) {
-			langs = append(langs, l)
-		}
-	}
-	s.Languages = langs
+	s.Languages = normLangs(s.Languages)
 	if !slices.Contains([]string{"", "anthropic", "local", "none"}, s.LLM.Provider) {
 		s.LLM.Provider = ""
 	}
@@ -620,6 +646,17 @@ func (g *generator) SetSettings(s GenSettings) {
 	g.saveLocked()
 	g.mu.Unlock()
 	g.poke()
+}
+
+// normLangs keeps the valid two-letter codes, lowercased, once each.
+func normLangs(in []string) []string {
+	langs := []string{}
+	for _, l := range in {
+		if l = strings.ToLower(strings.TrimSpace(l)); regexp.MustCompile(`^[a-z]{2}$`).MatchString(l) && !slices.Contains(langs, l) {
+			langs = append(langs, l)
+		}
+	}
+	return langs
 }
 
 // Retry puts a failed job back in the queue (and its source, if it was

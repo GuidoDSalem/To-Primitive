@@ -156,7 +156,7 @@ func TestGeneratorLanguages(t *testing.T) {
 	g, dir, now := genFixture(t)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("LLM_BASE_URL", "")
-	g.SetSettings(GenSettings{Enabled: true, Templates: []string{"levels"}, Languages: []string{"es", "EN", "en", "xx1"}})
+	g.SetSettings(GenSettings{Enabled: true, SkipChoice: true, Templates: []string{"levels"}, Languages: []string{"es", "EN", "en", "xx1"}})
 	if strings.Join(g.state.Settings.Languages, ",") != "es,en" {
 		t.Fatalf("languages %v", g.state.Settings.Languages)
 	}

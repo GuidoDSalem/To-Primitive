@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // Photos and videos uploaded from the Generar page land in the input folder
@@ -70,5 +72,56 @@ func TestUpload(t *testing.T) {
 	}
 	if res, _ := post(map[string]string{"notas.txt": "x"}); res.StatusCode != 400 {
 		t.Errorf("a text file: %d", res.StatusCode)
+	}
+}
+
+// By default a new source (uploaded or dropped in the folder) waits until
+// its templates are chosen.
+func TestChooseTemplates(t *testing.T) {
+	g, _, now := genFixture(t)
+	g.state.Settings.Enabled, g.state.Settings.SkipChoice = true, false
+	if _, err := g.Upload(bytes.NewReader([]byte("png")), "mona.png"); err != nil {
+		t.Fatal(err)
+	}
+	// Dropped in the folder: taken once it stops changing.
+	clip := filepath.Join(g.in, "clip.mp4")
+	os.WriteFile(clip, []byte("mp4"), 0o644)
+	old := now.Add(-time.Minute)
+	os.Chtimes(clip, old, old)
+	g.scan()
+	g.scan()
+	if len(g.state.Jobs) != 0 || len(g.state.Waiting) != 2 {
+		t.Fatalf("jobs %v, waiting %d", jobsOf(g), len(g.state.Waiting))
+	}
+	if _, err := g.Start("mona.png", []string{"shapes"}, nil); err == nil {
+		t.Error("a video template for a photo")
+	}
+	n, err := g.Start("mona.png", []string{"levels", "nope", "reveal"}, []string{"FR", "it"})
+	if err != nil || n != 4 {
+		t.Fatalf("start: %d %v", n, err)
+	}
+	var got []string
+	for _, j := range g.state.Jobs {
+		got = append(got, j.Template+":"+j.Lang)
+	}
+	if strings.Join(got, ",") != "reveal:fr,reveal:it,levels:fr,levels:it" {
+		t.Errorf("jobs %v", got)
+	}
+	if _, err := g.Start("mona.png", []string{"reveal"}, nil); err == nil {
+		t.Error("started twice")
+	}
+	g.scan()
+	if len(g.state.Waiting) != 1 || len(g.state.Jobs) != 4 {
+		t.Errorf("after scan: waiting %d, jobs %d", len(g.state.Waiting), len(g.state.Jobs))
+	}
+	if err := g.Dismiss("clip.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(g.in, discardedDir, "clip.mp4")); err != nil || len(g.state.Waiting) != 0 {
+		t.Errorf("dismissed: %v, waiting %d", err, len(g.state.Waiting))
+	}
+	g.scan()
+	if len(g.state.Waiting) != 0 {
+		t.Error("a dismissed source came back")
 	}
 }

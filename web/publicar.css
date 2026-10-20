@@ -126,3 +126,20 @@ code { font-size: 11px; color: var(--accent); }
 .warn-line { color: #f2b45c; font-size: 13px; }
 .warn-line button { font-size: 12px; padding: 3px 8px; margin-left: 6px; }
 .job .what small { color: var(--muted); }
+.waiting { display: flex; flex-direction: column; gap: 10px; }
+.wcard { display: grid; grid-template-columns: 110px 1fr; gap: 14px; padding: 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); }
+.wcard .thumb { width: 110px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 6px; background: #000; }
+.wcard .body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wcard .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.wcard .head strong { overflow-wrap: anywhere; }
+.wcard .head span { color: var(--muted); font-size: 12px; }
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+.tpl { display: flex; gap: 8px; align-items: flex-start; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 13px; }
+.tpl.on { border-color: var(--accent); background: #6aa8ff14; }
+.tpl input { margin-top: 2px; }
+.tpl small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.wcard .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wcard .foot input[type=text] { width: 110px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.wcard .foot .n { color: var(--muted); font-size: 12px; }
+.wcard .foot button { font-size: 13px; padding: 5px 10px; margin: 0; }
+.wcard .foot button:disabled { opacity: .45; cursor: not-allowed; }

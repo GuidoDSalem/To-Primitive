@@ -18,9 +18,10 @@
     <section>
       <h2>Generador</h2>
       <label class="check big"><input id="enabled" type="checkbox"> Generar automáticamente</label>
-      <p class="hint">Cada foto o video que aparezca en la carpeta de entrada se convierte en un reel por cada template marcado (los que corresponden: algunos son solo para fotos o solo para videos), con la configuración base de cada uno. Se hacen de a uno.</p>
+      <label class="check"><input id="ask" type="checkbox"> Preguntar qué templates probar en cada foto o video</label>
+      <p class="hint">Cada foto o video nuevo (subido o dejado en la carpeta de entrada) espera a que elijas sus templates; después se hace un reel por template e idioma, con la configuración base de cada uno, de a uno. Sin preguntar, se hacen todos los templates por defecto apenas aparece.</p>
       <div class="field" style="margin-top:12px">
-        <label>Templates</label>
+        <label>Templates por defecto <span class="kinds">(cuando no pregunta)</span></label>
         <div id="templates" class="checks"></div>
       </div>
       <div class="field">
@@ -71,11 +72,16 @@
     </div>
     <div id="dropzone" class="dropzone">
       <p><strong>Arrastrá fotos o videos acá</strong></p>
-      <p class="hint">Se guardan en la carpeta de entrada y empiezan a generarse sus versiones.</p>
+      <p class="hint">Se guardan en la carpeta de entrada; después elegís qué templates probar.</p>
       <button id="pick" type="button" class="primary">Elegir archivos…</button>
       <input id="files" type="file" accept="image/*,video/*" multiple hidden>
     </div>
     <p id="paused" class="warn-line" hidden>El generador está pausado: lo que subas queda en la entrada, pero no se genera hasta activarlo. <button id="enableNow" type="button">Activar</button></p>
+
+    <div id="waitingBox" hidden>
+      <h2 style="margin-top:22px">Elegí qué templates probar <span id="waitCount" class="count"></span></h2>
+      <div id="waiting" class="waiting"></div>
+    </div>
 
     <h2 style="margin-top:22px">En proceso <span id="jobCount" class="count"></span></h2>
     <div id="sources" class="jobs"></div>

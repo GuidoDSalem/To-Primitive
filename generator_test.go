@@ -20,6 +20,7 @@ func genFixture(t *testing.T) (*generator, string, *time.Time) {
 		t.Fatal(err)
 	}
 	g.state.Settings.Languages = []string{"es"} // one version per template, unless a test says otherwise
+	g.state.Settings.SkipChoice = true          // every template at once, unless a test says otherwise
 	now := time.Now()
 	g.now = func() time.Time { return now }
 	return g, dir, &now
@@ -63,7 +64,7 @@ func TestGeneratorQueue(t *testing.T) {
 	}
 
 	// Only some templates; a file that keeps changing waits.
-	g.SetSettings(GenSettings{Enabled: true, Templates: []string{"reveal", "shapes", "nope"}, Languages: []string{"es"}})
+	g.SetSettings(GenSettings{Enabled: true, SkipChoice: true, Templates: []string{"reveal", "shapes", "nope"}, Languages: []string{"es"}})
 	if strings.Join(g.state.Settings.Templates, ",") != "reveal,shapes" {
 		t.Errorf("settings %+v", g.state.Settings)
 	}
@@ -102,7 +103,7 @@ func TestGeneratorQueue(t *testing.T) {
 func TestGeneratorComplete(t *testing.T) {
 	needFFmpeg(t)
 	g, dir, now := genFixture(t)
-	g.SetSettings(GenSettings{Enabled: true, Templates: []string{"reveal", "levels"}, Languages: []string{"es"}})
+	g.SetSettings(GenSettings{Enabled: true, SkipChoice: true, Templates: []string{"reveal", "levels"}, Languages: []string{"es"}})
 	src := filepath.Join(g.in, "mona lisa.png")
 	os.WriteFile(src, []byte("not really a png"), 0o644)
 	old := now.Add(-time.Minute)
