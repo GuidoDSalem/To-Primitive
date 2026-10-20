@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -142,10 +143,13 @@ type ReelEntry struct {
 	Width    int             `json:"width"`
 	Height   int             `json:"height"`
 	Meta     json.RawMessage `json:"meta"`
+	Source   string          `json:"source,omitempty"` // its photo or video, under sources/ (it can reopen in the editor)
+	Edited   *time.Time      `json:"edited,omitempty"`
 }
 
 // library keeps finished reels on disk (unlike uploads, it survives restarts):
-// <id>.mp4 and <id>.json side by side.
+// <id>.mp4 and <id>.json side by side, and the photo or video each was made
+// from in sources/<hash>/<name> (shared by the reels made from it).
 type library struct {
 	dir string
 	mu  sync.Mutex
@@ -235,8 +239,13 @@ func (l *library) Delete(id string) error {
 	if _, err := os.Stat(mpath); err != nil {
 		return os.ErrNotExist
 	}
+	e, _, _ := l.entry(id)
 	os.Remove(vpath)
-	return os.Remove(mpath)
+	if err := os.Remove(mpath); err != nil {
+		return err
+	}
+	l.dropUnusedSourceLocked(e.Source)
+	return nil
 }
 
 // ---------- handlers ----------
@@ -342,7 +351,18 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"name": name})
 		return
 	}
-	// save=1: keep it in the library (with meta) and answer with its entry.
+	// lib=<id>: a library reel edited again, saved over itself.
+	if id := r.FormValue("lib"); id != "" {
+		e, err := srv.lib.Replace(r.Context(), id, out, json.RawMessage(r.FormValue("meta")))
+		if err != nil {
+			pubError(w, err)
+			return
+		}
+		writeJSON(w, e)
+		return
+	}
+	// save=1: keep it in the library (with meta, and its source to edit it
+	// later) and answer with its entry.
 	if r.FormValue("save") != "" {
 		f, err := os.Open(out)
 		if err != nil {
@@ -354,6 +374,11 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			return
+		}
+		if err := srv.keepMuxSource(r, e.ID, dir); err != nil {
+			log.Printf("library: reel %s saved without its source: %v", e.ID, err)
+		} else if saved, err := srv.lib.Get(e.ID); err == nil {
+			e = saved
 		}
 		writeJSON(w, e)
 		return

@@ -17,7 +17,7 @@
         <span id="refineVerb">Refinando</span> <strong id="refineName"></strong>
         <span id="refineState" class="hint"></span>
         <div id="refineLangs" class="chips"></div>
-        <span class="hint">Los cambios valen para todos los idiomas; las frases se escriben en cada uno (cambiá de idioma para verlas y editarlas).</span>
+        <span id="refineHint" class="hint">Los cambios valen para todos los idiomas; las frases se escriben en cada uno (cambiá de idioma para verlas y editarlas).</span>
         <label id="refineQueueBox" class="check"><input id="refineQueue" type="checkbox" checked> Al guardar, mandar todos los idiomas a la cola</label>
         <a id="refineBack" href="revisar.html">← volver a Revisar</a>
       </div>
@@ -117,7 +117,9 @@
         <div id="testFrameBox" class="field" hidden>
           <label for="testFrame">Frame de prueba <output id="testFrameOut"></output></label>
           <input id="testFrame" type="range" min="0" max="1" step="0.01" value="0">
-          <p class="hint">Ajustá todo sobre algunos frames del tramo y después calculá el video completo.</p>
+          <button id="addTestFrame" type="button" class="wide">Agregar este frame</button>
+          <div id="testFrames" class="frames"></div>
+          <p class="hint">Ajustá todo sobre algunos frames del tramo (cada uno sigue donde lo dejaste) y después calculá el video completo.</p>
         </div>
         <div class="row">
           <button id="pause" class="wide">Pausar</button>

@@ -163,8 +163,9 @@ type PubItem struct {
 	ScheduledAt *time.Time `json:"scheduledAt,omitempty"`
 	PublishedAt *time.Time `json:"publishedAt,omitempty"`
 	Result      string     `json:"result,omitempty"`
-	Brand       string     `json:"brand,omitempty"`    // the reel's brand (its record), e.g. @account
-	Editable    bool       `json:"editable,omitempty"` // has its settings and source: it can reopen in the reel editor
+	Brand       string     `json:"brand,omitempty"`      // the reel's brand (its record), e.g. @account
+	Editable    bool       `json:"editable,omitempty"`   // has its settings and source: it can reopen in the reel editor
+	Duplicable  bool       `json:"duplicable,omitempty"` // from the generator: it can be made again in another language
 	Warnings    []string   `json:"warnings,omitempty"`
 }
 
@@ -189,6 +190,8 @@ type publisher struct {
 	mu    sync.Mutex
 	state pubState
 	probe map[string]mediaInfo // by name|size|mtime
+
+	editable func(side map[string]any) bool // whether a video's source can be found (set by the server)
 }
 
 func newPublisher(dir string, up uploader) (*publisher, error) {
@@ -287,7 +290,8 @@ func (p *publisher) item(path string, fi os.FileInfo) PubItem {
 		it.Brand, _ = s["brand"].(string)
 		it.Brand = strings.TrimSpace(it.Brand)
 		src, _ := m["source"].(string)
-		it.Editable = validSourceName(src)
+		it.Duplicable = m["reel"] == nil && validSourceName(src)
+		it.Editable = p.editable != nil && p.editable(m)
 	}
 
 	// What would keep it from being a Short.

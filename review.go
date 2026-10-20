@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -389,21 +388,27 @@ func (srv *server) reviewSpec(w http.ResponseWriter, r *http.Request, g *generat
 		pubError(w, err)
 		return
 	}
-	writeReelSpec(w, g, name, readSidecar(path), g.out, stageGenerated)
-}
-
-// writeReelSpec answers with what the editor needs to reopen the reel name
-// (with JSON side) from dir: its settings, its source and the same reel in
-// the other languages (same source and template, found in dir), since an
-// edit applies to all of them. Versions at stage skip are left out.
-func writeReelSpec(w http.ResponseWriter, g *generator, name string, side map[string]any, dir, skip string) {
-	it := reviewItem(PubItem{Name: name}, side)
-	if _, err := g.sourcePath(it.Source); err != nil {
+	side := readSidecar(path)
+	src, err := g.sourcePath(reviewItem(PubItem{Name: name}, side).Source)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	writeReelSpec(w, name, side, src, g.out, stageGenerated)
+}
+
+// writeReelSpec answers with what the editor needs to reopen the reel name
+// (with JSON side, made from src): its settings, its source and the same
+// reel in the other languages (same source and template, found in dir, if
+// any), since an edit applies to all of them. Versions at stage skip are
+// left out.
+func writeReelSpec(w http.ResponseWriter, name string, side map[string]any, src, dir, skip string) {
+	it := reviewItem(PubItem{Name: name}, side)
 	siblings := []map[string]any{}
-	entries, _ := os.ReadDir(dir)
+	entries := []os.DirEntry{}
+	if dir != "" {
+		entries, _ = os.ReadDir(dir)
+	}
 	for _, e := range entries {
 		if e.IsDir() || !validName(e.Name()) || e.Name() == name {
 			continue
@@ -416,7 +421,7 @@ func writeReelSpec(w http.ResponseWriter, g *generator, name string, side map[st
 	}
 	writeJSON(w, map[string]any{
 		"name": name, "lang": it.Lang, "template": it.Template, "stage": it.Stage, "title": side["title"],
-		"source":   map[string]string{"name": it.Source, "type": mime.TypeByExtension(strings.ToLower(filepath.Ext(it.Source))), "kind": sourceKind(it.Source)},
+		"source":   sourceInfo(filepath.Base(src)),
 		"settings": side["settings"],
 		"siblings": siblings,
 	})

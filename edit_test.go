@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -81,5 +83,94 @@ func TestEditQueued(t *testing.T) {
 	body, ct = multipartBody(t, map[string]string{"video": video}, map[string]string{"queue": "no está.mp4"})
 	if r, _ := http.Post(ts.URL+"/api/reels/mux", ct, body); r.StatusCode != http.StatusNotFound {
 		t.Errorf("replacing a missing video: %d", r.StatusCode)
+	}
+}
+
+// A library reel saved with its photo, reopened, saved again over itself,
+// and editable from the queue too.
+func TestLibraryEdit(t *testing.T) {
+	needFFmpeg(t)
+	dir := t.TempDir()
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	os.MkdirAll(srv.dataDir, 0o755)
+	os.MkdirAll(srv.lib.dir, 0o755)
+	pub, _ := newPublisher(filepath.Join(dir, "pub"), simulatedUploader{})
+	srv.pub = pub
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	video := silentVideo(t, t.TempDir(), 1)
+	photo := filepath.Join(t.TempDir(), "mona lisa.png")
+	os.WriteFile(photo, []byte("png bytes"), 0o644)
+
+	save := func() ReelEntry {
+		body, ct := multipartBody(t, map[string]string{"video": video, "src": photo}, map[string]string{"save": "1", "meta": `{"template":"reveal","phrases":[{"role":"title","text":"uno"}]}`})
+		res, err := http.Post(ts.URL+"/api/reels/mux", ct, body)
+		if err != nil || res.StatusCode != 200 {
+			t.Fatalf("save: %v %v", err, res.Status)
+		}
+		var e ReelEntry
+		json.NewDecoder(res.Body).Decode(&e)
+		return e
+	}
+	e, e2 := save(), save()
+	if e.Source == "" || e.Source != e2.Source {
+		t.Fatalf("source kept once for both: %q %q", e.Source, e2.Source)
+	}
+	res, _ := http.Get(ts.URL + "/api/reels/" + e.ID + "/spec")
+	var spec struct {
+		Source   struct{ Name, Kind string }
+		Settings struct{ Template string }
+	}
+	json.NewDecoder(res.Body).Decode(&spec)
+	if spec.Source.Name != "mona lisa.png" || spec.Source.Kind != "image" || spec.Settings.Template != "reveal" {
+		t.Fatalf("spec %+v", spec)
+	}
+	res, _ = http.Get(ts.URL + "/api/reels/" + e.ID + "/source")
+	if b, _ := io.ReadAll(res.Body); string(b) != "png bytes" {
+		t.Errorf("source %q", b)
+	}
+
+	body, ct := multipartBody(t, map[string]string{"video": video}, map[string]string{"lib": e.ID, "meta": `{"template":"reveal","phrases":[{"role":"title","text":"dos"}]}`})
+	if r, err := http.Post(ts.URL+"/api/reels/mux", ct, body); err != nil || r.StatusCode != 200 {
+		t.Fatalf("replace: %v %v", err, r.Status)
+	}
+	list, _ := srv.lib.List()
+	if len(list) != 2 {
+		t.Fatalf("%d reels", len(list))
+	}
+	got, _ := srv.lib.Get(e.ID)
+	var meta bytes.Buffer
+	json.Compact(&meta, got.Meta)
+	if meta.String() != `{"template":"reveal","phrases":[{"role":"title","text":"dos"}]}` || got.Edited == nil || got.Source != e.Source {
+		t.Errorf("replaced %+v", got)
+	}
+
+	// Sent to the queue: editable there too (from the library's source).
+	if r, _ := http.Post(ts.URL+"/api/reels/"+e.ID+"/queue", "", nil); r.StatusCode != 200 {
+		t.Fatalf("queue: %d", r.StatusCode)
+	}
+	q := pub.Overview().Queue
+	if len(q) != 1 || !q[0].Editable || q[0].Duplicable {
+		t.Fatalf("queued %+v", q)
+	}
+	res, _ = http.Get(ts.URL + "/api/publish/queue/" + url.PathEscape(q[0].Name) + "/spec")
+	var qs struct {
+		Source   struct{ Name string }
+		Siblings []any
+	}
+	json.NewDecoder(res.Body).Decode(&qs)
+	if qs.Source.Name != "mona lisa.png" || len(qs.Siblings) != 0 {
+		t.Errorf("queue spec %+v", qs)
+	}
+
+	// The source goes with the last reel that uses it.
+	src := filepath.Join(srv.lib.dir, e.Source)
+	srv.lib.Delete(e.ID)
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("source removed while another reel uses it")
+	}
+	srv.lib.Delete(e2.ID)
+	if _, err := os.Stat(src); err == nil {
+		t.Errorf("unused source kept")
 	}
 }

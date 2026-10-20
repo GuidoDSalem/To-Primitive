@@ -30,6 +30,7 @@ const reel = {
   touched: new Set(), // settings changed by hand: a template's base doesn't override them
   lang: "es",       // language of the texts drawn on the reel
   gen: null,        // generated shapes: { key, image } (photo) or { key, anim } (video)
+  testFrames: [],   // video: moments kept to try the settings on (seconds)
   generating: null, // { cancel() } while generating
 };
 const srcVideo = $("srcVideo");
@@ -347,11 +348,21 @@ function testTime() {
 }
 const liveImageKey = () => JSON.stringify({ name: reel.name, url: reel.url, mode: reel.framing.mode, crop: crop(), t: testTime() });
 
+// Sessions left paused, by image (e.g. other test frames): going back to
+// one picks up its shapes where they were instead of starting over.
+const keptLive = new Map(); // liveImageKey → session id
+const MAX_KEPT = 6;
+
 function closeLive() {
   live.es?.close();
   if (live.id) {
     // Free the CPU: the server drops old sessions by itself later.
     api(`/api/sessions/${live.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: true }) }).catch(() => {});
+    if (live.key) {
+      keptLive.delete(live.key);
+      keptLive.set(live.key, live.id);
+      while (keptLive.size > MAX_KEPT) keptLive.delete(keptLive.keys().next().value);
+    }
   }
   Object.assign(live, { token: live.token + 1, id: null, es: null, key: null, g: null, img: null, running: false, count: 0, runKey: null, sentKey: null });
 }
@@ -377,9 +388,13 @@ async function startLive() {
   live.key = key;
   const token = live.token;
   const p = { ...params(), paused: live.paused };
+  const reused = keptLive.get(key);
+  keptLive.delete(key);
   let d;
   try {
-    if (reel.kind === "image") {
+    if (reused) {
+      d = { id: reused };
+    } else if (reel.kind === "image") {
       const form = new FormData();
       form.append("image", await framedPhoto(), "reel.jpg");
       form.append("params", JSON.stringify(p));
@@ -396,9 +411,17 @@ async function startLive() {
   }
   if (token !== live.token) return; // superseded meanwhile
   live.id = d.id;
-  live.sentKey = keyOf(p);
+  live.sentKey = reused ? null : keyOf(p); // a kept session has old parameters and is paused
   const es = new EventSource(`/api/sessions/${d.id}/events`);
   live.es = es;
+  // The server may have dropped a kept session meanwhile: make a new one.
+  if (reused) {
+    es.addEventListener("error", () => {
+      if (es.readyState !== EventSource.CLOSED || token !== live.token || live.img) return;
+      Object.assign(live, { id: null, key: null, es: null });
+      startLive();
+    });
+  }
   // Every snapshot and status carries the parameters the session is using:
   // that (not the order in which answers arrive) says whether its shapes
   // are the ones the controls ask for.
@@ -1033,7 +1056,7 @@ async function loadSource(file) {
   closeVariants();
   player.pause();
   if (reel.url) URL.revokeObjectURL(reel.url);
-  Object.assign(reel, { kind: null, name: file.name, url: URL.createObjectURL(file), img: null, video: null, gen: null, shown: false });
+  Object.assign(reel, { kind: null, name: file.name, file, url: URL.createObjectURL(file), img: null, video: null, gen: null, shown: false });
   reel.framing = { mode: reel.framing.mode, zoom: 1, px: 0.5, py: 0.5 };
   $("stats").textContent = isVideo ? "Subiendo el video…" : "Cargando la foto…";
   setProgress(null, "");
@@ -1070,6 +1093,7 @@ async function loadSource(file) {
   if (reel.video) {
     fillKFPS(reel.video.info.fps || 30);
     $("testFrame").value = (reel.portion.start + reel.portion.end) / 2; // as the editor: a frame from the middle
+    reel.testFrames = [+$("testFrame").value];
   }
   closeLive();
   applyBase();
@@ -1112,6 +1136,9 @@ function setPortion(s, e) {
   tf.min = reel.portion.start;
   tf.max = reel.portion.end;
   if (old < reel.portion.start || old > reel.portion.end) tf.value = (reel.portion.start + reel.portion.end) / 2;
+  reel.testFrames = reel.testFrames.filter((t) => t >= reel.portion.start && t <= reel.portion.end);
+  if (!reel.testFrames.length) reel.testFrames.push(+tf.value);
+  drawTestFrames();
   if (+tf.value !== old) restartLiveSoon();
 }
 
@@ -1121,7 +1148,60 @@ $("testFrame").addEventListener("input", () => {
   player.pause();
   player.seek(testTime() - reel.portion.start);
   refreshUI();
+  drawTestFrames();
   restartLiveSoon();
+});
+
+// ---------- test frames (as in the editor) ----------
+
+// Moments of the video kept to try the settings on; each keeps its own
+// session (paused while another one is shown).
+const frameURL = (t, size) => `/api/videos/${reel.video.id}/frame?t=${t.toFixed(2)}&size=${size}`;
+const sameTime = (a, b) => Math.abs(a - b) < 0.015;
+
+function drawTestFrames() {
+  if (reel.kind !== "video") {
+    $("testFrames").replaceChildren();
+    return;
+  }
+  const now = testTime();
+  $("addTestFrame").disabled = reel.testFrames.some((t) => sameTime(t, now));
+  $("testFrames").replaceChildren(...reel.testFrames.map((t, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "frame" + (sameTime(t, now) ? " on" : "");
+    b.title = "Probar en este frame";
+    b.innerHTML = `<img src="${frameURL(t, 320)}" alt=""><span>${fmtTime(t)}</span>` + (reel.testFrames.length > 1 ? `<i title="Quitar">×</i>` : "");
+    b.addEventListener("click", (e) => {
+      if (e.target.tagName === "I") removeTestFrame(i);
+      else selectTestFrame(t);
+    });
+    return b;
+  }));
+}
+
+function selectTestFrame(t) {
+  $("testFrame").value = t;
+  setView("shapes");
+  player.pause();
+  player.seek(testTime() - reel.portion.start);
+  drawTestFrames();
+  refreshUI();
+  startLive();
+}
+
+function removeTestFrame(i) {
+  const [t] = reel.testFrames.splice(i, 1);
+  if (sameTime(t, testTime())) selectTestFrame(reel.testFrames[Math.min(i, reel.testFrames.length - 1)]);
+  else drawTestFrames();
+}
+
+$("addTestFrame").addEventListener("click", () => {
+  const t = testTime();
+  if (reel.testFrames.some((x) => sameTime(x, t))) return;
+  reel.testFrames.push(t);
+  reel.testFrames.sort((a, b) => a - b);
+  drawTestFrames();
 });
 
 function onPortion(changed) {
@@ -1398,6 +1478,7 @@ function reelMeta(comp, res, seconds) {
     template: comp.id, templateChoice: reel.template,
     duration: Math.round(comp.duration * 100) / 100, durationChoice: { ...reel.duration },
     source: { kind: reel.kind, name: reel.name, size: sourceSize(), portion: reel.kind === "video" ? { ...reel.portion } : null },
+    ...(reel.kind === "video" ? { testFrames: reel.testFrames.slice(), testFrame: testTime() } : {}),
     framing: { ...reel.framing }, crop: crop(),
     shapes: params(),
     animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
@@ -1459,7 +1540,7 @@ async function encodeAndSend(comp, extra, signal, onProgress) {
   }
   form.append("volume", $("volume").value);
   form.append("fadeOut", $("fadeOut").value);
-  for (const [k, v] of Object.entries(extra)) form.append(k, v);
+  for (const [k, v] of Object.entries(extra)) if (v != null) form.append(k, v);
   form.append("meta", JSON.stringify(reelMeta(comp, res, seconds)));
   return api("/api/reels/mux", { method: "POST", body: form, signal });
 }
@@ -1486,7 +1567,9 @@ $("export").addEventListener("click", async () => {
       $("expStatus").dataset.done = "1";
       return;
     }
-    const entry = await encodeAndSend(comp, { save: "1" }, exporting.signal, setExport);
+    // Its source goes with it, to edit it again later.
+    const keep = reel.kind === "video" ? { srcVideo: reel.video.id, srcName: reel.name } : { src: reel.file };
+    const entry = await encodeAndSend(comp, { save: "1", ...keep }, exporting.signal, setExport);
     const link = document.createElement("a");
     link.href = `/api/reels/${entry.id}/video?download=1`;
     link.download = `reel-${entry.id}.mp4`;
@@ -1561,6 +1644,9 @@ async function loadLibrary() {
         alert("No se pudo: " + err.message);
       }
     });
+    if (e.source) {
+      actions.append(Object.assign(document.createElement("a"), { className: "button", href: `reels.html?lib=${e.id}`, textContent: "Editar", title: "Volver a abrirlo con todos sus ajustes" }));
+    }
     actions.append(queue, dl, del);
     row.append(v, info, actions);
     box.append(row);
@@ -1577,10 +1663,13 @@ loadLibrary();
 // its settings to adjust them by hand and save it again over itself.
 // reels.html?edit=<name>: the same, for a reel already in the publishing
 // queue; saving replaces it there (in every queued language).
-const EDIT = new URLSearchParams(location.search).get("edit");
-const REFINE = EDIT || new URLSearchParams(location.search).get("refine");
-const reelAPI = (name) => (EDIT ? "/api/publish/queue/" : "/api/review/") + encodeURIComponent(name);
-const exportLabel = () => (EDIT ? "Guardar cambios en la cola" : REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
+// reels.html?lib=<id>: the same, for a reel of the library.
+const query = new URLSearchParams(location.search);
+const EDIT = query.get("edit");
+const LIB = query.get("lib");
+const REFINE = EDIT || LIB || query.get("refine");
+const reelAPI = (name) => (LIB ? "/api/reels/" : EDIT ? "/api/publish/queue/" : "/api/review/") + encodeURIComponent(name);
+const exportLabel = () => (EDIT ? "Guardar cambios en la cola" : LIB ? "Guardar cambios en la biblioteca" : REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
 
 // Load a source from a URL into the editor (a WebM copy if this browser
 // can't play the video).
@@ -1633,6 +1722,12 @@ function restoreRecord(m) {
     $("durFree").value = reel.duration.free;
   }
   if (reel.kind === "video" && m.source?.portion) setPortion(m.source.portion.start, m.source.portion.end);
+  if (reel.kind === "video" && m.testFrames?.length) {
+    reel.testFrames = m.testFrames.filter((t) => t >= reel.portion.start && t <= reel.portion.end);
+    if (m.testFrame !== undefined) $("testFrame").value = m.testFrame;
+    if (!reel.testFrames.length) reel.testFrames.push(testTime());
+    drawTestFrames();
+  }
   if (Array.isArray(m.phrases) && m.phrases.length) {
     reel.phrases = m.phrases.map((ph) => ({ ...ph, text: ph.text ?? "" }));
   }
@@ -1694,7 +1789,7 @@ async function saveRefined(signal) {
       switchLang(v.lang);
       const comp = composition();
       if (!comp) throw new Error("el reel no está listo");
-      await encodeAndSend(comp, EDIT ? { queue: v.name } : { refine: v.name }, signal, (f, text) =>
+      await encodeAndSend(comp, LIB ? { lib: v.name } : EDIT ? { queue: v.name } : { refine: v.name }, signal, (f, text) =>
         setExport((saved.length + f) / refining.versions.length, `${v.lang.toUpperCase()} (${saved.length + 1} de ${refining.versions.length}): ${text}`));
       saved.push(v);
     }
@@ -1702,6 +1797,11 @@ async function saveRefined(signal) {
     switchLang(start);
   }
   let msg = `Guardado en ${saved.map((v) => v.lang.toUpperCase()).join(", ")}`;
+  if (LIB) {
+    $("refineState").textContent = "· guardado ✓";
+    loadLibrary();
+    return "Guardado en la biblioteca, en lugar del anterior";
+  }
   if (EDIT) {
     $("refineState").textContent = "· guardado en la cola ✓";
     return msg + ", en su lugar de la cola";
@@ -1729,16 +1829,17 @@ async function saveRefined(signal) {
 async function runRefine(name) {
   $("refineBar").hidden = false;
   $("refineName").textContent = name;
-  if (EDIT) {
-    $("refineVerb").textContent = "Editando (en la cola)";
+  if (EDIT || LIB) {
+    $("refineVerb").textContent = EDIT ? "Editando (en la cola)" : "Editando (de la biblioteca)";
     $("refineQueueBox").hidden = true;
-    $("refineBack").textContent = "← volver a Publicar";
-    $("refineBack").href = "publicar.html";
+    $("refineBack").textContent = EDIT ? "← volver a Publicar" : "← nuevo reel";
+    $("refineBack").href = EDIT ? "publicar.html" : "reels.html";
   }
   $("export").textContent = exportLabel();
   try {
     const spec = await api(`${reelAPI(name)}/spec`);
-    $("refineState").textContent = `· ${(spec.lang || "").toUpperCase()} · ${Templates.LIST[spec.template]?.name ?? spec.template}`;
+    const tpl = spec.template || spec.settings?.template;
+    $("refineState").textContent = `· ${(spec.lang || spec.settings?.lang || "").toUpperCase()} · ${Templates.LIST[tpl]?.name ?? tpl ?? ""}`;
     const src = `${reelAPI(name)}/source`;
     await loadFromURL(src, spec.source.name, spec.source.type, spec.source.kind, null);
     restoreRecord(spec.settings || {});
@@ -1751,6 +1852,7 @@ async function runRefine(name) {
       alignTexts(sib.lang, sib.settings?.phrases);
     }
     showRefineLangs();
+    $("refineLangs").hidden = $("refineHint").hidden = refining.versions.length < 2; // one language: nothing to switch
     sendParams();
     restartLiveSoon(); // the restored framing
     refreshUI();

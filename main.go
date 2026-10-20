@@ -112,6 +112,12 @@ func newServer(dataDir, reelsDir string) *server {
 }
 
 func (srv *server) routes() http.Handler {
+	if srv.pub != nil {
+		srv.pub.editable = func(side map[string]any) bool {
+			_, err := srv.queuedSource(side)
+			return err == nil
+		}
+	}
 	web, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(web))
@@ -142,6 +148,8 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/reels/{id}/video", srv.reelVideo)
 	mux.HandleFunc("DELETE /api/reels/{id}", srv.reelDelete)
 	mux.HandleFunc("POST /api/reels/{id}/queue", srv.withPublisher(srv.reelQueue))
+	mux.HandleFunc("GET /api/reels/{id}/spec", srv.reelSpec)
+	mux.HandleFunc("GET /api/reels/{id}/source", srv.reelSource)
 
 	mux.HandleFunc("GET /api/publish", srv.withPublisher(srv.pubOverview))
 	mux.HandleFunc("PUT /api/publish/settings", srv.withPublisher(srv.pubSettings))

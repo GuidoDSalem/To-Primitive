@@ -167,7 +167,7 @@ En el navegador, con cámara simulada en Chrome:
    - Las zonas rojas marcan lo que tapan TikTok, Reels y Shorts (barra superior, texto de la cuenta, botones). Conviene dejar lo importante fuera de ellas.
 5. **Formas, en vivo como en el editor.** Cantidad y tipo; las formas aparecen en la vista previa mientras se buscan y cada cambio se ve al instante, igual que en el editor principal (con *Pausar / Continuar*).
    - Fotos: la sesión trabaja sobre la foto ya recortada a 9:16, así las formas cubren justo el cuadro. Cuando están todas, el reel las usa solo; si cambiás algo, se buscan de nuevo y el reel se actualiza al terminar.
-   - Videos: se ajusta sobre un **frame de prueba** del tramo (también recortado); cambiarlo arma otra sesión en ese frame.
+   - Videos: se ajusta sobre **frames de prueba** del tramo (también recortados), como en el editor: con el deslizador elegís un momento y con **Agregar este frame** lo guardás en la lista. Cada frame tiene su propia sesión; al pasar a otro, el anterior se pausa y, al volver, sigue con las formas donde estaban. Los frames de prueba se guardan con el reel.
 6. **Algoritmo.** Los mismos controles que el editor: opacidad (fija o automática por forma), repetición, resolución de trabajo y fondo (color promedio o elegido).
 7. **Animación.**
    - Fotos: las opciones de la grabación del editor, con sus tarjetas animadas: orden de aparición, velocidad (curva de easing, en Revelado), efecto y duración del efecto. Se aplican al instante, sin recalcular.
@@ -176,7 +176,7 @@ En el navegador, con cámara simulada en Chrome:
 9. **Audio.** Sin sonido, el sonido del video (el tramo elegido) o un archivo propio, desde el segundo que elijas. Con volumen y fundido de salida. Se escucha al reproducir la vista previa.
 10. **Exportar.** El navegador dibuja cada cuadro a 1080×1920 y 30 fps y lo codifica en H.264 (WebCodecs); el servidor le agrega el audio en AAC (recortado a la duración del reel, rellenado con silencio si es más corto y con el fundido) y lo guarda en la biblioteca. El MP4 se descarga solo y está listo para subir a TikTok, Reels o Shorts. Si el navegador solo puede codificar VP9, el servidor lo convierte a H.264.
 
-**Biblioteca.** Al pie del panel están los reels exportados, del más nuevo al más viejo, para verlos, descargarlos o borrarlos. Cada uno guarda un registro con lo que lo generó: template, duración, fuente, tramo, encuadre, formas, textos, audio y datos de la exportación. Sirve para comparar después qué combinación funciona mejor en las redes.
+**Biblioteca.** Al pie del panel están los reels exportados, del más nuevo al más viejo, para verlos, descargarlos, **editarlos** o borrarlos. **Editar** vuelve a abrir el reel con todos sus ajustes (el reel guarda una copia de su foto o video de origen en `sources/`, compartida entre los reels hechos de la misma fuente) y al guardar lo reemplaza en la biblioteca. Los reels exportados antes de esta función no guardaron su origen, así que no se pueden editar. Cada uno guarda un registro con lo que lo generó: template, duración, fuente, tramo, encuadre, formas, textos, audio y datos de la exportación. Sirve para comparar después qué combinación funciona mejor en las redes.
 
 Exportar un reel de 10 s de una foto con 100 formas tarda unos 9 s; uno de 2,5 s de video, unos 4 s (más el cálculo de las formas).
 
@@ -234,7 +234,7 @@ Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`.
 
 El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el título sale de la frase de título (o de la pregunta) con `{formas}` y `{tipo}` completados, y la descripción del cierre más `#Shorts`.
 
-**Editar reel.** Cada reel de la cola que salió del generador (o de Revisar) se puede volver a abrir en el editor de reels con **Editar reel**, con todos sus ajustes y con sus otros idiomas que estén en la cola (mismo origen y template). Igual que al refinar, los cambios valen para todos los idiomas y las frases se editan en cada uno. **Guardar cambios en la cola** vuelve a exportar todos los idiomas y los reemplaza en su mismo lugar de la cola, sin tocar título, descripción ni tags (esos se cambian con **Textos**).
+**Editar reel.** Cada reel de la cola que salió del generador (o de Revisar), o de la biblioteca del editor de reels, se puede volver a abrir en el editor de reels con **Editar reel**, con todos sus ajustes y con sus otros idiomas que estén en la cola (mismo origen y template). Igual que al refinar, los cambios valen para todos los idiomas y las frases se editan en cada uno. **Guardar cambios en la cola** vuelve a exportar todos los idiomas y los reemplaza en su mismo lugar de la cola, sin tocar título, descripción ni tags (esos se cambian con **Textos**).
 
 **Duplicar en otro idioma.** Cada reel de la cola que salió del generador tiene **Duplicar en otro idioma**: elegís el idioma (es, en, pt, fr, it, de u otro código) y un **LLM local** traduce todos los textos —título, descripción, tags y cada frase que aparece en pantalla—, manteniendo `{formas}`, `{tipo}`, los emojis y `#Shorts`. Después se vuelve a renderizar el reel con los mismos ajustes (Chromium en el contenedor) y la copia entra a la cola justo después del original, ya refinada. El avance se ve en "Duplicando en otros idiomas", con **Reintentar** si falla. Usa siempre el modelo local (el de la página Generar, o `LLM_BASE_URL` / `LLM_MODEL`), nunca Claude. No se puede duplicar a un idioma que ya está en la cola, ni un video que no tenga sus ajustes (por ejemplo, uno dejado a mano en la carpeta).
 
@@ -370,11 +370,12 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/live/{id}/frame` | Un frame de la cámara (JPEG); header `X-Capture-Time` con el reloj del navegador |
 | `PUT /api/live/{id}/params` | Cambia los parámetros (`restart: true` empieza de nuevo) |
 | `DELETE /api/live/{id}` | Cierra la sesión (también se cierra sola a los 10 s sin nadie mirando) |
-| `POST /api/reels/mux` | Agrega el audio a un reel codificado en el navegador. Campos: `video`; opcionales `audio` (archivo propio) o `source` (id de un video subido, con `sourceStart`), más `audioStart`, `volume` y `fadeOut`. El audio se recorta a la duración del video, se rellena con silencio si es más corto y termina con un fundido. Si el video no es H.264 se convierte. Con `save=1` (y `meta`) lo guarda en la biblioteca y responde con su entrada en vez del archivo |
+| `POST /api/reels/mux` | Agrega el audio a un reel codificado en el navegador. Campos: `video`; opcionales `audio` (archivo propio) o `source` (id de un video subido, con `sourceStart`), más `audioStart`, `volume` y `fadeOut`. El audio se recorta a la duración del video, se rellena con silencio si es más corto y termina con un fundido. Si el video no es H.264 se convierte. Con `save=1` (y `meta`) lo guarda en la biblioteca y responde con su entrada en vez del archivo; con `src` (la foto) o `srcVideo` + `srcName` (id de un video subido) guarda también su origen, para editarlo después. Con `lib=<id>` reemplaza ese reel de la biblioteca |
 | `POST /api/reels` | Guarda un reel terminado en la biblioteca (campos `video` y `meta`, un JSON libre: template, duración, ajustes…) |
 | `GET /api/reels` | Lista la biblioteca, del más nuevo al más viejo |
 | `GET /api/reels/{id}/video` | El MP4 de un reel (`?download=1` para descargarlo) |
-| `DELETE /api/reels/{id}` | Borra un reel de la biblioteca |
+| `DELETE /api/reels/{id}` | Borra un reel de la biblioteca (y su origen, si ningún otro reel lo usa) |
+| `GET /api/reels/{id}/spec` · `GET …/source` | Ajustes y origen, para reabrirlo en el editor (`reels.html?lib=`) |
 | `POST /api/reels/{id}/queue` | Copia un reel de la biblioteca a la carpeta de publicación (con título y descripción) |
 | `GET /api/publish` | Regla, cola (con el horario de cada video), publicados y registro |
 | `PUT /api/publish/settings` | La regla: `enabled`, `times` (HH:MM), `days` (0 = domingo), `tz` |

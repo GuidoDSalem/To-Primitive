@@ -83,3 +83,4 @@ textarea, input[type=text] {
 .phrase .del { padding: 2px 8px; }
 .phrase .role { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 code { font-size: 11px; color: var(--accent); }
+#testFrames { margin-top: 6px; }
