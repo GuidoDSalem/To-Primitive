@@ -79,11 +79,7 @@ func newCopywriter(s LLMSettings) copywriter {
 	}
 	switch provider {
 	case "anthropic":
-		model := s.Model
-		if model == "" {
-			model = envOr("LLM_MODEL", defaultClaudeModel)
-		}
-		return &claudeWriter{model: model}
+		return &claudeWriter{model: claudeModel(s.Model)}
 	case "local":
 		base := s.BaseURL
 		if base == "" {
@@ -96,6 +92,19 @@ func newCopywriter(s LLMSettings) copywriter {
 		return &localWriter{baseURL: strings.TrimRight(base, "/"), model: model}
 	}
 	return rulesWriter{}
+}
+
+// claudeModel is the Claude model to use: the one chosen, CLAUDE_MODEL, or
+// the default. A name that isn't a Claude model (e.g. the local model's,
+// from LLM_MODEL or the same field on the Generar page) is ignored: sent to
+// Claude it only gets a 404.
+func claudeModel(chosen string) string {
+	for _, m := range []string{chosen, os.Getenv("CLAUDE_MODEL"), os.Getenv("LLM_MODEL")} {
+		if m = strings.TrimSpace(m); strings.HasPrefix(m, "claude-") {
+			return m
+		}
+	}
+	return defaultClaudeModel
 }
 
 // ---------- the base title ----------
@@ -302,6 +311,8 @@ func (w *claudeWriter) Write(ctx context.Context, req CopyRequest) (map[string]L
 				return nil, fmt.Errorf("Claude rechazó la API key (%d)", apierr.StatusCode)
 			case 429:
 				return nil, errors.New("Claude: límite de uso alcanzado, probá más tarde")
+			case 404:
+				return nil, fmt.Errorf("Claude: el modelo %q no existe o tu cuenta no tiene acceso (404)", w.model)
 			}
 			return nil, fmt.Errorf("Claude: error %d", apierr.StatusCode)
 		}

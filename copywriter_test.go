@@ -201,3 +201,22 @@ func TestGeneratorLanguages(t *testing.T) {
 		t.Errorf("sidecar %v", side)
 	}
 }
+
+// The local model's name never reaches Claude (it would answer 404).
+func TestClaudeModel(t *testing.T) {
+	t.Setenv("LLM_MODEL", "llama3.1")
+	t.Setenv("CLAUDE_MODEL", "")
+	for chosen, want := range map[string]string{
+		"":                  defaultClaudeModel,
+		"llama3.1":          defaultClaudeModel,
+		"claude-sonnet-5-5": "claude-sonnet-5-5",
+	} {
+		if got := claudeModel(chosen); got != want {
+			t.Errorf("claudeModel(%q) = %q, want %q", chosen, got, want)
+		}
+	}
+	t.Setenv("CLAUDE_MODEL", "claude-haiku-5-5")
+	if got := claudeModel(""); got != "claude-haiku-5-5" {
+		t.Errorf("CLAUDE_MODEL: %q", got)
+	}
+}

@@ -203,7 +203,7 @@ Cada reel generado sale **en cada idioma configurado** (por defecto español e i
 
 - **El título base sale del nombre del archivo**, limpio de lo que no dice nada (`mona_lisa-final (2).png` → "Mona lisa"; capturas de pantalla o `IMG_20240101…` no dan título). Con ese título, el template y un cuadro de la fuente, un modelo escribe todo junto, una vez por fuente y template, para todos los idiomas: título del video, frase de entrada en pantalla, cierre, descripción, tags y las frases propias del template (como "¿En qué nivel la adivinaste?").
 - **Quién escribe** (en la página Generar o con variables de entorno):
-  - **Claude** (por defecto si hay `ANTHROPIC_API_KEY` en el `.env`): mira también la imagen. Modelo `claude-opus-5-5` salvo que pongas otro.
+  - **Claude** (por defecto si hay `ANTHROPIC_API_KEY` en el `.env`): mira también la imagen. Modelo `claude-opus-5-5` salvo que pongas otro en `CLAUDE_MODEL` (o en el campo Modelo de la página); un nombre que no empieza con `claude-` se ignora para Claude, así el `LLM_MODEL` del modelo local no le llega.
   - **Un modelo local** con API compatible con OpenAI (Ollama, LM Studio…): `LLM_BASE_URL` (por ejemplo `http://host.docker.internal:11434/v1` para Ollama) y `LLM_MODEL` con el modelo que tengas descargado. Solo recibe texto.
   - **Reglas**, sin modelo: textos armados a partir del título (en español e inglés; otros idiomas usan el inglés).
   Si el modelo falla (sin conexión, key inválida…), ese reel usa las reglas y el registro lo dice, así nunca se queda sin textos.
