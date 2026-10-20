@@ -121,6 +121,13 @@ const Templates = (() => {
   const POSITIONS = { top: "Arriba", half: "Mitad (debajo de la línea)", middle: "Centro", lower: "Abajo", foot: "Al pie" };
   const STYLES = { title: "Título", subtitle: "Subtítulo", question: "Pregunta", label: "Etiqueta", counter: "Contador (grande)" };
   const SHAPE_NAMES = { 0: "formas", 1: "triángulos", 2: "rectángulos", 3: "elipses", 4: "círculos", 5: "rectángulos", 6: "curvas", 7: "elipses", 8: "polígonos" };
+  // Words the templates draw themselves, per language (others fall back to English).
+  const WORDS = {
+    es: { shapes: "formas", names: SHAPE_NAMES },
+    en: { shapes: "shapes", names: { 0: "shapes", 1: "triangles", 2: "rectangles", 3: "ellipses", 4: "circles", 5: "rectangles", 6: "curves", 7: "ellipses", 8: "polygons" } },
+    pt: { shapes: "formas", names: { 0: "formas", 1: "triângulos", 2: "retângulos", 3: "elipses", 4: "círculos", 5: "retângulos", 6: "curvas", 7: "elipses", 8: "polígonos" } },
+  };
+  const words = (lang) => WORDS[lang] ?? WORDS.en;
 
   // How visible something shown from a to b is at t, fading over f seconds.
   // Edges at the start or the end of the reel don't fade.
@@ -443,7 +450,7 @@ const Templates = (() => {
             ? drawShapes(g, src.image, gw, gh, counts[c.i])
             : Motion.render(g, src.anim, t, interp, gw, gh, counts[c.i])));
           ctx.globalAlpha = 1;
-          cellLabel(ctx, c, `${counts[c.i]} formas`, h, a * (1 - smooth((t - R) / X)));
+          cellLabel(ctx, c, `${counts[c.i]} ${words(src.lang ?? "es").shapes}`, h, a * (1 - smooth((t - R) / X)));
         }
         overlay(ctx, smooth((t - R) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
       },
@@ -457,7 +464,10 @@ const Templates = (() => {
       direction: "build", order: b.order, curve: b.curve, effect: b.effect,
       effectTime: Math.min(b.effectTime, D * 0.15), duration: 0.55 * D, holdStart: 0.3, holdEnd: D,
     }));
-    const names = src.variants.map((v, i) => `${i + 1} · ${SHAPE_NAMES[v.mode][0].toUpperCase()}${SHAPE_NAMES[v.mode].slice(1)}`);
+    const names = src.variants.map((v, i) => {
+      const n = words(src.lang ?? "es").names[v.mode];
+      return `${i + 1} · ${n[0].toUpperCase()}${n.slice(1)}`;
+    });
     return {
       duration: D, videoTime: () => null, originalFrom: Infinity,
       paint(ctx, t, w, h) {
@@ -590,5 +600,5 @@ const Templates = (() => {
     ctx.restore();
   }
 
-  return { LIST, SAFE, POSITIONS, STYLES, SHAPE_NAMES, auto, make, phrasesFor, phraseAlpha, drawTexts };
+  return { LIST, SAFE, POSITIONS, STYLES, SHAPE_NAMES, words, auto, make, phrasesFor, phraseAlpha, drawTexts };
 })();

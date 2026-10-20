@@ -28,6 +28,7 @@ const reel = {
   audio: { mode: "none", file: null, url: null }, // mode: "none" | "source" | "file"
   phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
   touched: new Set(), // settings changed by hand: a template's base doesn't override them
+  lang: "es",       // language of the texts drawn on the reel
   gen: null,        // generated shapes: { key, image } (photo) or { key, anim } (video)
   generating: null, // { cancel() } while generating
 };
@@ -140,7 +141,7 @@ const paintOriginalPanels = (ctx, w, h) => panels(ctx, w, h, (c, x, y, pw, ph) =
 
 const templateId = () => (reel.template === "auto" ? Templates.auto(reel.kind) : reel.template);
 // Values the phrases can mention: "{formas} {tipo}" → "150 triángulos".
-const textVars = () => ({ formas: params().shapes, tipo: Templates.SHAPE_NAMES[params().mode] ?? "formas" });
+const textVars = () => ({ formas: params().shapes, tipo: Templates.words(reel.lang).names[params().mode] ?? Templates.words(reel.lang).shapes });
 
 // Requested length of the reel, in seconds.
 function reelSeconds() {
@@ -161,11 +162,11 @@ function composition(id = templateId()) {
   const vs = spec.variants ? variantImages(spec.variants) : null;
   if (spec.variants && !vs) return null;
   const build = buildOpts(), interp = $("interp").value;
-  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp, vs ? variants.version : 0]);
+  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp, vs ? variants.version : 0, reel.lang]);
   const cache = (reel.gen.comps ??= new Map());
   if (!cache.has(key)) {
     cache.set(key, Templates.make(id, {
-      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, variants: vs, duration: reelSeconds(), build, interp,
+      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, variants: vs, duration: reelSeconds(), build, interp, lang: reel.lang,
       paintOriginal: (ctx, x, y, w, h) => paintOriginal(ctx, w, h, true, x, y),
     }));
   }
@@ -1400,7 +1401,7 @@ function reelMeta(comp, res, seconds) {
     framing: { ...reel.framing }, crop: crop(),
     shapes: params(),
     animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
-    base: reel.base, changedByHand: [...reel.touched],
+    base: reel.base, changedByHand: [...reel.touched], lang: reel.lang,
     phrases: reel.phrases.filter((p) => p.text.trim()).map(({ role, text, from, to, pos, style }) => ({ role, text, from, to, pos, style })),
     brand: $("tBrand").value,
     audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
@@ -1601,6 +1602,12 @@ async function runAuto(id) {
     if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
     reel.template = job.template;
     applyBase(true);
+    // The texts written for this language, by phrase role.
+    reel.lang = job.lang || "es";
+    for (const ph of reel.phrases) {
+      if (job.phrases?.[ph.role] !== undefined) ph.text = job.phrases[ph.role];
+    }
+    renderPhrases();
     restartLiveSoon(); // the template may frame differently
     refreshUI();
     if (reel.kind === "video") {

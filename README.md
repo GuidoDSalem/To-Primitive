@@ -195,6 +195,18 @@ Próximas etapas: una cola de publicación con una regla configurable (por ejemp
 - **Cómo funciona:** para que los reels salgan idénticos a los del editor, el servidor abre el mismo editor de reels en un **Chromium sin pantalla** (`reels.html?auto=<trabajo>`). Esa página carga la fuente, elige el template con su base, espera las formas (o calcula el video), exporta y devuelve el MP4. Si el navegador no puede reproducir el video (Chromium sin H.264), el servidor le da una copia en WebM. La imagen de Docker trae Chromium y las fuentes (con emoji). Sin Docker hace falta tener Chromium o Chrome instalado (`CHROME_BIN` para indicar cuál).
 - Cada reel tarda aproximadamente 1 minuto (30 s a 1 min con 150 formas; más con Mosaico, de 500, o con ¿Cuál preferís?, que calcula cuatro tipos de forma).
 
+### Títulos, descripciones, tags e idiomas
+
+Cada reel generado sale **en cada idioma configurado** (por defecto español e inglés): un video por idioma, con sus frases en pantalla traducidas, y su título, descripción (con `#Shorts` y hashtags) y tags en el JSON (`"lang"`, `"title"`, `"hook"`, `"description"`, `"tags"`). Los archivos se llaman `<fuente> · <template> · <idioma>.mp4`.
+
+- **El título base sale del nombre del archivo**, limpio de lo que no dice nada (`mona_lisa-final (2).png` → "Mona lisa"; capturas de pantalla o `IMG_20240101…` no dan título). Con ese título, el template y un cuadro de la fuente, un modelo escribe todo junto, una vez por fuente y template, para todos los idiomas: título del video, frase de entrada en pantalla, cierre, descripción, tags y las frases propias del template (como "¿En qué nivel la adivinaste?").
+- **Quién escribe** (en la página Generar o con variables de entorno):
+  - **Claude** (por defecto si hay `ANTHROPIC_API_KEY` en el `.env`): mira también la imagen. Modelo `claude-opus-5-5` salvo que pongas otro.
+  - **Un modelo local** con API compatible con OpenAI (Ollama, LM Studio…): `LLM_BASE_URL` (por ejemplo `http://host.docker.internal:11434/v1` para Ollama) y `LLM_MODEL` con el modelo que tengas descargado. Solo recibe texto.
+  - **Reglas**, sin modelo: textos armados a partir del título (en español e inglés; otros idiomas usan el inglés).
+  Si el modelo falla (sin conexión, key inválida…), ese reel usa las reglas y el registro lo dice, así nunca se queda sin textos.
+- Los idiomas son códigos de dos letras (`es, en, pt…`); cada uno suma una versión de cada reel, o sea más tiempo de generación.
+
 **Carpetas con Docker** (en `.env`, ver `.env.example`): `INPUT_HOST_DIR` (entrada, se monta en `/entrada`) y `GENERATED_HOST_DIR` (generados, en `/generados`). Sin Docker: `-input` / `INPUT_DIR` (por defecto `./entrada`) y `-generated` / `GENERATED_DIR` (por defecto `./generados`).
 
 ## Publicar
@@ -357,7 +369,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/publish/queue/{name}/now` | Publicar ya |
 | `POST /api/publish/published/{name}/requeue` | Devolver un publicado a la cola (primero) |
 | `GET /api/auto` | Generador: ajustes, trabajos, reels generados y registro |
-| `PUT /api/auto/settings` | `enabled` y `templates` (vacío = todos) |
+| `PUT /api/auto/settings` | `enabled`, `templates` (vacío = todos), `languages` y `llm` (`provider`: `anthropic`, `local`, `none` o vacío = automático; `model`; `baseURL`) |
 | `GET /api/auto/jobs/{id}` · `/source` | Lo que la página automática necesita: template y fuente (`?compat` = video en WebM) |
 | `POST /api/auto/jobs/{id}/progress` · `/fail` · `/retry` | Avance, error y reintento de un trabajo |
 | `GET /api/auto/outputs/{name}/video` · `POST …/queue` · `DELETE` | Ver, mandar a la cola de publicación o borrar un reel generado |

@@ -58,3 +58,7 @@ code { font-size: 11px; color: var(--accent); }
 .job progress, .job .err { grid-column: 1 / -1; margin: 0; }
 .job button { justify-self: start; font-size: 12px; padding: 3px 8px; }
 .item .actions a.button { margin: 0; font-size: 12px; padding: 4px 8px; text-align: center; }
+#panel input[type=text] {
+  width: 100%; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+}

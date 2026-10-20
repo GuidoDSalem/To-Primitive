@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"log"
 	"mime"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -50,8 +54,17 @@ const (
 // GenSettings: whether the folder is watched, and which templates to make
 // (empty: all the ones that fit the source).
 type GenSettings struct {
-	Enabled   bool     `json:"enabled"`
-	Templates []string `json:"templates"`
+	Enabled   bool        `json:"enabled"`
+	Templates []string    `json:"templates"`
+	Languages []string    `json:"languages"` // one version of each reel per language (e.g. es, en)
+	LLM       LLMSettings `json:"llm"`       // who writes titles, descriptions, tags and translations
+}
+
+func (s GenSettings) langs() []string {
+	if len(s.Languages) == 0 {
+		return []string{"es", "en"}
+	}
+	return s.Languages
 }
 
 type GenJob struct {
@@ -59,6 +72,7 @@ type GenJob struct {
 	Source   string    `json:"source"` // file name in the input folder
 	Kind     string    `json:"kind"`   // image | video
 	Template string    `json:"template"`
+	Lang     string    `json:"lang"`
 	State    string    `json:"state"` // queued | running | done | error
 	Stage    string    `json:"stage,omitempty"`
 	Progress float64   `json:"progress"`
@@ -73,7 +87,12 @@ type genState struct {
 	Settings GenSettings   `json:"settings"`
 	Jobs     []*GenJob     `json:"jobs"`
 	Log      []pubLogEntry `json:"log"`
+	// What was written for each source and template, by language (so all
+	// the languages of a reel share one call to the model).
+	Copies map[string]map[string]LangCopy `json:"copies"`
 }
+
+func copyKey(j *GenJob) string { return j.Source + "|" + j.Template }
 
 type generator struct {
 	in, out string
@@ -202,11 +221,13 @@ func (g *generator) scan() {
 		if !g.state.Settings.Enabled {
 			continue
 		}
-		tpls := g.templatesFor(kind)
+		tpls, langs := g.templatesFor(kind), g.state.Settings.langs()
 		for _, t := range tpls {
-			g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, State: "queued", Created: g.now()})
+			for _, l := range langs {
+				g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, Lang: l, State: "queued", Created: g.now()})
+			}
 		}
-		g.logLocked(name, "fuente nueva", fmt.Sprintf("%d versiones: %s", len(tpls), strings.Join(tpls, ", ")))
+		g.logLocked(name, "fuente nueva", fmt.Sprintf("%d versiones: %s × %s", len(tpls)*len(langs), strings.Join(tpls, ", "), strings.Join(langs, ", ")))
 	}
 	g.seen = seen
 	g.saveLocked()
@@ -250,6 +271,7 @@ func (g *generator) run(ctx context.Context, j *GenJob) {
 		g.end(j.ID, "", errors.New("no hay un navegador para generar (instalá Chromium o definí CHROME_BIN)"))
 		return
 	}
+	g.ensureCopy(ctx, j)
 	profile, _ := os.MkdirTemp("", "to-primitive-chrome-")
 	defer os.RemoveAll(profile)
 	cctx, cancel := context.WithTimeout(ctx, jobTimeout)
@@ -307,6 +329,13 @@ func (g *generator) end(id, output string, failure error) {
 	for _, o := range g.state.Jobs {
 		pending = pending || (o.Source == j.Source && (o.State == "queued" || o.State == "running"))
 	}
+	if !pending {
+		for k := range g.state.Copies { // its texts aren't needed anymore
+			if strings.HasPrefix(k, j.Source+"|") {
+				delete(g.state.Copies, k)
+			}
+		}
+	}
 	if !pending && g.sourceExistsLocked(j.Source) {
 		dest := filepath.Join(g.in, processedDir, j.Source)
 		if err := os.Rename(filepath.Join(g.in, j.Source), dest); err == nil {
@@ -351,8 +380,63 @@ func (g *generator) poke() {
 // ---------- results ----------
 
 // outputName is "<source> · <template>.mp4", without clashing.
+// ensureCopy has the texts of the job's source and template written (in
+// every language, in one go) before its reel is made. If the model fails,
+// the rules write them, so a reel is never left without its copy.
+func (g *generator) ensureCopy(ctx context.Context, j *GenJob) {
+	g.mu.Lock()
+	if _, ok := g.state.Copies[copyKey(j)]; ok {
+		g.mu.Unlock()
+		return
+	}
+	j.Stage = "escribiendo títulos y textos"
+	settings := g.state.Settings
+	g.mu.Unlock()
+
+	req := CopyRequest{BaseTitle: titleFromName(j.Source), Template: j.Template, Langs: settings.langs(), Texts: templateTexts[j.Template], Shapes: templateShapes[j.Template]}
+	req.Frame = sourceFrame(ctx, filepath.Join(g.in, j.Source), j.Kind)
+	w := newCopywriter(settings.LLM)
+	copies, err := w.Write(ctx, req)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err != nil {
+		g.logLocked(j.Source, "error", "textos: "+err.Error()+" (se usan las reglas)")
+		copies, _ = rulesWriter{}.Write(ctx, req)
+	} else {
+		g.logLocked(j.Source, "textos", templateNames[j.Template]+" · "+w.Name())
+	}
+	if g.state.Copies == nil {
+		g.state.Copies = map[string]map[string]LangCopy{}
+	}
+	g.state.Copies[copyKey(j)] = copies
+	g.saveLocked()
+}
+
+// Shapes in each template's base (as in web/templates.js), for the copy.
+var templateShapes = map[string]int{"reveal": 150, "loop": 150, "shapes": 150, "levels": 150, "compare": 200, "curtain": 200, "counter": 300, "mosaic": 500, "prefer": 150}
+
+// sourceFrame is a JPEG of the source (the middle of a video) for the
+// model to see; nil if it can't be made.
+func sourceFrame(ctx context.Context, path, kind string) []byte {
+	t := 0.0
+	if kind == "video" {
+		if info, err := probeMedia(ctx, path); err == nil {
+			t = info.Duration / 2
+		}
+	}
+	img, err := extractFrame(ctx, path, t, 768)
+	if err != nil {
+		return nil
+	}
+	var buf bytes.Buffer
+	if jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}) != nil {
+		return nil
+	}
+	return buf.Bytes()
+}
+
 func (g *generator) outputName(j *GenJob) string {
-	base := strings.TrimSuffix(j.Source, filepath.Ext(j.Source)) + " · " + templateNames[j.Template]
+	base := strings.TrimSuffix(j.Source, filepath.Ext(j.Source)) + " · " + templateNames[j.Template] + " · " + j.Lang
 	name := base + ".mp4"
 	for i := 2; ; i++ {
 		if _, err := os.Stat(filepath.Join(g.out, name)); errors.Is(err, os.ErrNotExist) {
@@ -371,7 +455,8 @@ func (g *generator) Complete(id, reelPath string, meta json.RawMessage) (string,
 		return "", errors.New("ese trabajo no está en curso")
 	}
 	name := g.outputName(j)
-	src, tpl := j.Source, j.Template
+	src, tpl, lang := j.Source, j.Template, j.Lang
+	c, hasCopy := g.state.Copies[copyKey(j)][lang]
 	g.mu.Unlock()
 
 	dest := filepath.Join(g.out, name)
@@ -384,12 +469,16 @@ func (g *generator) Complete(id, reelPath string, meta json.RawMessage) (string,
 	if err != nil {
 		return "", err
 	}
-	side := map[string]any{"source": src, "template": tpl, "generated": g.now().Format(time.RFC3339), "settings": meta}
-	title, desc := reelTexts(meta)
-	if title != "" {
-		side["title"] = title
+	side := map[string]any{"source": src, "template": tpl, "lang": lang, "generated": g.now().Format(time.RFC3339), "settings": meta}
+	if hasCopy {
+		side["title"], side["description"], side["tags"], side["hook"] = c.Title, c.Description, c.Tags, c.Hook
+	} else {
+		title, desc := reelTexts(meta)
+		if title != "" {
+			side["title"] = title
+		}
+		side["description"] = strings.TrimSpace(desc + "\n\n#Shorts")
 	}
-	side["description"] = strings.TrimSpace(desc + "\n\n#Shorts")
 	writeSidecar(dest, side)
 	g.end(id, name, nil)
 	return name, nil
@@ -409,15 +498,17 @@ func (g *generator) Progress(id, stage string, fraction float64) {
 
 // GenOverview is what the generator page shows.
 type GenOverview struct {
-	InDir      string        `json:"in"`
-	OutDir     string        `json:"out"`
-	Browser    string        `json:"browser"`
-	Settings   GenSettings   `json:"settings"`
-	Templates  []string      `json:"templates"` // all, in order
-	Jobs       []*GenJob     `json:"jobs"`      // newest first
-	Outputs    []PubItem     `json:"outputs"`   // newest first
-	Log        []pubLogEntry `json:"log"`
-	Publishing bool          `json:"publishing"` // there's a publishing folder to send them to
+	InDir        string        `json:"in"`
+	OutDir       string        `json:"out"`
+	Browser      string        `json:"browser"`
+	Settings     GenSettings   `json:"settings"`
+	Templates    []string      `json:"templates"` // all, in order
+	Jobs         []*GenJob     `json:"jobs"`      // newest first
+	Outputs      []PubItem     `json:"outputs"`   // newest first
+	Log          []pubLogEntry `json:"log"`
+	Publishing   bool          `json:"publishing"` // there's a publishing folder to send them to
+	Writer       string        `json:"writer"`     // who writes the texts now
+	HasClaudeKey bool          `json:"hasClaudeKey"`
 }
 
 func (g *generator) Overview(probe func(string) []PubItem) GenOverview {
@@ -475,6 +566,16 @@ func (g *generator) SetSettings(s GenSettings) {
 		}
 	}
 	s.Templates = tpls
+	langs := []string{}
+	for _, l := range s.Languages {
+		if l = strings.ToLower(strings.TrimSpace(l)); regexp.MustCompile(`^[a-z]{2}$`).MatchString(l) && !slices.Contains(langs, l) {
+			langs = append(langs, l)
+		}
+	}
+	s.Languages = langs
+	if !slices.Contains([]string{"", "anthropic", "local", "none"}, s.LLM.Provider) {
+		s.LLM.Provider = ""
+	}
 	g.state.Settings = s
 	if s.Enabled {
 		g.logLocked("", "generador", "activo")
@@ -532,7 +633,10 @@ func (srv *server) genOverview(w http.ResponseWriter, r *http.Request, g *genera
 		}
 		return p.videosIn(dir)
 	})
+	o.Settings.Languages = o.Settings.langs()
 	o.Publishing = srv.pub != nil
+	o.Writer = newCopywriter(o.Settings.LLM).Name()
+	o.HasClaudeKey = os.Getenv("ANTHROPIC_API_KEY") != ""
 	writeJSON(w, o)
 }
 
@@ -551,8 +655,16 @@ func (srv *server) genJob(w http.ResponseWriter, r *http.Request, g *generator) 
 	j := g.jobLocked(r.PathValue("id"))
 	var out map[string]any
 	if j != nil {
-		out = map[string]any{"id": j.ID, "template": j.Template, "kind": j.Kind,
+		out = map[string]any{"id": j.ID, "template": j.Template, "kind": j.Kind, "lang": j.Lang,
 			"source": map[string]string{"name": j.Source, "type": mime.TypeByExtension(strings.ToLower(filepath.Ext(j.Source)))}}
+		// The on-screen texts for this language, by phrase role.
+		if c, ok := g.state.Copies[copyKey(j)][j.Lang]; ok {
+			phrases := map[string]string{"title": c.Hook, "closing": c.Closing}
+			for role, t := range c.Texts {
+				phrases[role] = t
+			}
+			out["phrases"] = phrases
+		}
 	}
 	g.mu.Unlock()
 	if out == nil {

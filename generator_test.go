@@ -19,6 +19,7 @@ func genFixture(t *testing.T) (*generator, string, *time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	g.state.Settings.Languages = []string{"es"} // one version per template, unless a test says otherwise
 	now := time.Now()
 	g.now = func() time.Time { return now }
 	return g, dir, &now
@@ -62,7 +63,7 @@ func TestGeneratorQueue(t *testing.T) {
 	}
 
 	// Only some templates; a file that keeps changing waits.
-	g.SetSettings(GenSettings{Enabled: true, Templates: []string{"reveal", "shapes", "nope"}})
+	g.SetSettings(GenSettings{Enabled: true, Templates: []string{"reveal", "shapes", "nope"}, Languages: []string{"es"}})
 	if strings.Join(g.state.Settings.Templates, ",") != "reveal,shapes" {
 		t.Errorf("settings %+v", g.state.Settings)
 	}
@@ -101,7 +102,7 @@ func TestGeneratorQueue(t *testing.T) {
 func TestGeneratorComplete(t *testing.T) {
 	needFFmpeg(t)
 	g, dir, now := genFixture(t)
-	g.SetSettings(GenSettings{Enabled: true, Templates: []string{"reveal", "levels"}})
+	g.SetSettings(GenSettings{Enabled: true, Templates: []string{"reveal", "levels"}, Languages: []string{"es"}})
 	src := filepath.Join(g.in, "mona lisa.png")
 	os.WriteFile(src, []byte("not really a png"), 0o644)
 	old := now.Add(-time.Minute)
@@ -151,7 +152,7 @@ func TestGeneratorComplete(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("outputs %v", out)
 	}
-	side := readSidecar(filepath.Join(g.out, "mona lisa · Revelado.mp4"))
+	side := readSidecar(filepath.Join(g.out, "mona lisa · Revelado · es.mp4"))
 	if side["title"] != "¿En qué nivel la adivinaste?" || !strings.Contains(side["description"].(string), "#Shorts") || side["template"] != "reveal" {
 		t.Errorf("sidecar %v", side)
 	}
@@ -172,14 +173,14 @@ func TestGeneratorComplete(t *testing.T) {
 	}
 	pub, _ := newPublisher(filepath.Join(dir, "pub"), simulatedUploader{})
 	srv.pub = pub
-	req, _ := http.NewRequest("POST", ts.URL+"/api/auto/outputs/"+strings.ReplaceAll("mona lisa · Revelado.mp4", " ", "%20")+"/queue", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/api/auto/outputs/"+strings.ReplaceAll("mona lisa · Revelado · es.mp4", " ", "%20")+"/queue", nil)
 	if res, err := http.DefaultClient.Do(req); err != nil || res.StatusCode != 200 {
 		t.Fatalf("to the queue: %v %v", err, res.Status)
 	}
 	if q := pub.Overview().Queue; len(q) != 1 || q[0].Title != "¿En qué nivel la adivinaste?" {
 		t.Errorf("queue %+v", q)
 	}
-	if _, err := os.Stat(filepath.Join(g.out, "mona lisa · Revelado.mp4")); err == nil {
+	if _, err := os.Stat(filepath.Join(g.out, "mona lisa · Revelado · es.mp4")); err == nil {
 		t.Error("still in the output folder after moving it to the queue")
 	}
 }

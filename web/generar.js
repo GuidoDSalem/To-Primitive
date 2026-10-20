@@ -35,15 +35,30 @@ function showSettings(o) {
     label.append(box, ` ${name(t)} `, Object.assign(document.createElement("span"), { className: "kinds", textContent: `(${kinds(t)})` }));
     return label;
   }));
+  $("langs").value = o.settings.languages.join(", ");
+  $("llm").value = o.settings.llm.provider || "";
+  $("llmModel").value = o.settings.llm.model || "";
+  $("llmBase").value = o.settings.llm.baseURL || "";
+  $("llmLocal").hidden = $("llm").value !== "local";
+  $("llmModel").placeholder = $("llm").value === "local" ? "llama3.1" : $("llm").value === "none" ? "—" : "claude-opus-5-5";
   dirty = false;
 }
-$("enabled").addEventListener("input", () => { dirty = true; });
+for (const id of ["enabled", "langs", "llm", "llmModel", "llmBase"]) {
+  $(id).addEventListener("input", () => {
+    dirty = true;
+    $("llmLocal").hidden = $("llm").value !== "local";
+  });
+}
 
 $("save").addEventListener("click", async () => {
   const boxes = [...$("templates").querySelectorAll("input")];
   const chosen = boxes.filter((b) => b.checked).map((b) => b.dataset.value);
   try {
-    show(await api("/api/auto/settings", { method: "PUT", json: { enabled: $("enabled").checked, templates: chosen.length === boxes.length ? [] : chosen } }), true);
+    show(await api("/api/auto/settings", { method: "PUT", json: {
+      enabled: $("enabled").checked, templates: chosen.length === boxes.length ? [] : chosen,
+      languages: $("langs").value.split(",").map((l) => l.trim().toLowerCase()).filter(Boolean),
+      llm: { provider: $("llm").value, model: $("llmModel").value.trim(), baseURL: $("llmBase").value.trim() },
+    } }), true);
     $("saveStatus").textContent = "Guardado.";
   } catch (e) {
     $("saveStatus").textContent = "Error: " + e.message;
@@ -73,7 +88,7 @@ function jobRow(j) {
   const row = document.createElement("div");
   row.className = "job " + j.state;
   const what = Object.assign(document.createElement("div"), { className: "what" });
-  what.append(Object.assign(document.createElement("strong"), { textContent: j.source }), ` · ${name(j.template)}`);
+  what.append(Object.assign(document.createElement("strong"), { textContent: j.source }), ` · ${name(j.template)} · ${(j.lang || "es").toUpperCase()}`);
   const state = Object.assign(document.createElement("div"), { className: "state" });
   state.textContent = STATES[j.state] + (j.state === "running" && j.stage ? ` · ${j.stage}` : "") + (j.state === "done" && j.output ? ` → ${j.output}` : "");
   row.append(what, state);
@@ -123,6 +138,7 @@ function show(o, settingsToo = false) {
   if (settingsToo || !dirty) showSettings(o);
   $("inInfo").textContent = `Entrada: ${o.in} (las fuentes ya hechas pasan a procesados/)`;
   $("outInfo").textContent = `Generados: ${o.out}`;
+  $("writerInfo").textContent = `Escribe: ${o.writer}.` + (o.settings.llm.provider === "anthropic" && !o.hasClaudeKey ? " ⚠ Falta ANTHROPIC_API_KEY en el .env: se van a usar las reglas." : "");
   $("browserInfo").textContent = o.browser ? "Navegador: " + o.browser.split("/").pop() : "⚠ No hay navegador para generar: instalá Chromium o definí CHROME_BIN.";
   const active = o.jobs.filter((j) => j.state === "queued" || j.state === "running").length;
   $("jobCount").textContent = active ? `${active} pendientes` : "";

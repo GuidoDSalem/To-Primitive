@@ -23,6 +23,29 @@
         <label>Templates</label>
         <div id="templates" class="checks"></div>
       </div>
+      <div class="field">
+        <label for="langs">Idiomas</label>
+        <input id="langs" type="text" placeholder="es, en">
+        <p class="hint">Códigos de dos letras, separados por comas: cada reel se genera una vez por idioma, con sus frases en pantalla, título, descripción y tags.</p>
+      </div>
+      <div class="field">
+        <label for="llm">Quién escribe los textos</label>
+        <select id="llm">
+          <option value="">Automático (Claude si hay API key, si no modelo local o reglas)</option>
+          <option value="anthropic">Claude (API de Anthropic)</option>
+          <option value="local">Modelo local (Ollama, LM Studio…)</option>
+          <option value="none">Reglas, sin modelo</option>
+        </select>
+      </div>
+      <div id="llmLocal" class="field" hidden>
+        <label for="llmBase">Dirección del modelo local</label>
+        <input id="llmBase" type="text" placeholder="http://host.docker.internal:11434/v1">
+      </div>
+      <div class="field">
+        <label for="llmModel">Modelo</label>
+        <input id="llmModel" type="text" placeholder="por defecto">
+      </div>
+      <p id="writerInfo" class="hint"></p>
       <button id="save" class="wide primary">Guardar</button>
       <p id="saveStatus" class="hint"></p>
     </section>

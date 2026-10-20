@@ -11,6 +11,15 @@ services:
       PUBLISH_HOST_DIR: "${PUBLISH_HOST_DIR:-./publicar}"
       INPUT_HOST_DIR: "${INPUT_HOST_DIR:-./entrada}"
       GENERATED_HOST_DIR: "${GENERATED_HOST_DIR:-./generados}"
+      # Who writes titles, descriptions, tags and translations (see .env.example).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+    # Lets the container reach a local model running on this computer
+    # (host.docker.internal works on its own on macOS and Windows).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - reels:/reels
       # Folders on this computer (set them in .env, see .env.example):
