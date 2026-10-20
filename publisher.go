@@ -163,6 +163,7 @@ type PubItem struct {
 	ScheduledAt *time.Time `json:"scheduledAt,omitempty"`
 	PublishedAt *time.Time `json:"publishedAt,omitempty"`
 	Result      string     `json:"result,omitempty"`
+	Brand       string     `json:"brand,omitempty"` // the reel's brand (its record), e.g. @account
 	Warnings    []string   `json:"warnings,omitempty"`
 }
 
@@ -281,6 +282,10 @@ func (p *publisher) item(path string, fi os.FileInfo) PubItem {
 		}
 	}
 	it.Result, _ = m["result"].(string)
+	if s, ok := m["settings"].(map[string]any); ok {
+		it.Brand, _ = s["brand"].(string)
+		it.Brand = strings.TrimSpace(it.Brand)
+	}
 
 	// What would keep it from being a Short.
 	if info.Duration > 60.5 {

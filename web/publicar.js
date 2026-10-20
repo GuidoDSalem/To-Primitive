@@ -134,8 +134,8 @@ function itemCard(it, i, published) {
   video.preload = "metadata";
   video.muted = true;
   video.playsInline = true;
-  video.title = "Reproducir";
-  video.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
+  video.title = "Ver cómo se va a publicar";
+  video.addEventListener("click", () => preview.open(published ? view.published : view.queue, i, published));
 
   const body = document.createElement("div");
   body.className = "body";
@@ -235,6 +235,71 @@ function show(o, ruleToo = false) {
   }));
 }
 
+// ---------- preview: what is going to be published ----------
+
+const preview = (() => {
+  let list = [], i = 0, published = false;
+  const video = $("pvVideo");
+  // The channel name for the mock-up: the brand of the last reel, if any.
+  let channel = "@tucanal";
+  function render() {
+    const it = list[i];
+    if (!it) return close();
+    video.src = `/api/publish/${published ? "published" : "queue"}/${enc(it.name)}/video`;
+    video.play().catch(() => {});
+    const tags = (it.tags ?? []).map((t) => "#" + t.replace(/^#/, ""));
+    $("pvPos").textContent = `${published ? "Publicados" : "Cola"} · ${i + 1} / ${list.length}`;
+    $("pvTitle").textContent = it.title;
+    $("pvWhen").textContent = published
+      ? (it.publishedAt ? "Publicado el " + fmtWhen(it.publishedAt) : "Publicado")
+      : it.skipped ? "Salteado: no se publica" : it.scheduledAt ? `Sale el ${fmtWhen(it.scheduledAt)} (${fmtIn(it.scheduledAt)})` : "Sin horario (regla pausada)";
+    $("pvDesc").textContent = it.description;
+    $("pvTags").textContent = tags.join(" ");
+    $("pvWarn").textContent = (it.warnings ?? []).map((w) => "⚠ " + w).join("\n");
+    $("pvFile").textContent = `${it.name} · ${fmtDur(it.duration)} · ${it.width}×${it.height} · ${fmtSize(it.size)}`;
+    // As the apps show it: title (Shorts uses it as caption) and the first line of the description.
+    const first = it.description.split("\n").find((l) => l.trim()) ?? "";
+    $("pvCaption").replaceChildren(
+      Object.assign(document.createElement("div"), { className: "cap-title", textContent: it.title }),
+      ...(first && first !== it.title ? [Object.assign(document.createElement("div"), { className: "cap-desc", textContent: first })] : []),
+    );
+    $("pvChannel").textContent = it.brand || channel;
+  }
+  function open(items, at, isPublished) {
+    list = items.slice();
+    i = at;
+    published = isPublished;
+    $("viewer").hidden = false;
+    render();
+  }
+  function close() {
+    video.pause();
+    video.removeAttribute("src");
+    $("viewer").hidden = true;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+  const go = (d) => {
+    i = (i + d + list.length) % list.length;
+    render();
+  };
+  $("pvShowUI").addEventListener("input", () => { $("pvShorts").hidden = !$("pvShowUI").checked; });
+  $("pvPrev").addEventListener("click", () => go(-1));
+  $("pvNext").addEventListener("click", () => go(1));
+  $("pvClose").addEventListener("click", close);
+  video.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
+  document.addEventListener("keydown", (e) => {
+    if ($("viewer").hidden || e.target.matches("input[type=text], textarea")) return;
+    if (e.key === "ArrowRight") go(1);
+    else if (e.key === "ArrowLeft") go(-1);
+    else if (e.key === "Escape") close();
+    else if (e.key === " ") video.paused ? video.play() : video.pause();
+    else if (e.key === "f" || e.key === "F") (document.fullscreenElement ? document.exitFullscreen() : $("viewer").requestFullscreen()).catch(() => {});
+    else return;
+    e.preventDefault();
+  });
+  return { open, close, setChannel: (c) => { if (c) channel = c; } };
+})();
+
 async function refresh() {
   try {
     show(await api("/api/publish"));
@@ -244,4 +309,4 @@ async function refresh() {
 }
 $("refresh").addEventListener("click", refresh);
 refresh();
-setInterval(() => { if (!document.hidden) refresh(); }, 20000);
+setInterval(() => { if (!document.hidden && $("viewer").hidden) refresh(); }, 20000);

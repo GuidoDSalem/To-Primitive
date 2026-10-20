@@ -239,7 +239,7 @@ const viewer = (() => {
   $("vChoose").addEventListener("click", doChoose);
   $("vDiscard").addEventListener("click", doDiscard);
   document.addEventListener("keydown", (e) => {
-    if ($("viewer").hidden || e.target.matches("input, textarea")) return;
+    if ($("viewer").hidden || e.target.matches("input[type=text], textarea")) return;
     const k = e.key;
     if (k === "ArrowRight") go(1);
     else if (k === "ArrowLeft") go(-1);

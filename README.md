@@ -230,7 +230,7 @@ La etapa de cada versión (generada, elegida, refinada) se guarda en su JSON (`"
 { "title": "La Mona Lisa con 150 triángulos", "description": "¿Cuál hago mañana? #Shorts", "tags": ["arte", "lowpoly"] }
 ```
 
-Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`. Desde la página se pueden editar (se guardan en ese JSON). Al publicarse, el video y su JSON pasan a `publicados/`, con la fecha y el resultado. La página avisa si un video no sirve como Short (horizontal o de más de 60 s).
+Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`. Desde la página se pueden editar (se guardan en ese JSON). Al publicarse, el video y su JSON pasan a `publicados/`, con la fecha y el resultado. La página avisa si un video no sirve como Short (horizontal o de más de 60 s). Un clic en un video (de la cola o de los publicados) abre la **vista previa de lo que se va a publicar**: el reel grande, con sonido, y al costado título, descripción, tags, cuándo sale y los avisos; por defecto se ve **como en Shorts**, con el nombre del canal (la marca del reel), el título y la primera línea de la descripción encima del video (se puede quitar). ← → recorre la cola, Esc cierra.
 
 El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el título sale de la frase de título (o de la pregunta) con `{formas}` y `{tipo}` completados, y la descripción del cierre más `#Shorts`.
 

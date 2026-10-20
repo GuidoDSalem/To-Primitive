@@ -102,3 +102,17 @@ code { font-size: 11px; color: var(--accent); }
 .v-actions, .v-nav { display: flex; flex-wrap: wrap; gap: 8px; }
 .v-actions a.button { margin: 0; }
 .v-close { position: absolute; top: 0; right: 0; }
+
+/* Publishing preview: the reel in a phone, optionally with the Shorts UI on top. */
+.phone-preview { position: relative; height: 96vh; aspect-ratio: 9 / 16; max-width: 60vw; border-radius: 14px; overflow: hidden; background: #000; }
+.phone-preview video { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; border-radius: 0; object-fit: cover; }
+.shorts-ui { position: absolute; inset: 0; pointer-events: none; color: #fff; font-family: system-ui, sans-serif; text-shadow: 0 1px 3px #000a; }
+.shorts-side { position: absolute; right: 3%; bottom: 22%; display: flex; flex-direction: column; gap: 2.4vh; font-size: 3.2vh; align-items: center; }
+.shorts-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 12vh 18% 3.5vh 4%; background: linear-gradient(transparent, #0009); display: flex; flex-direction: column; gap: 1vh; }
+.shorts-channel { display: flex; align-items: center; gap: 1vh; font-size: 1.7vh; }
+.shorts-channel .avatar { width: 3.4vh; height: 3.4vh; border-radius: 50%; background: var(--accent); }
+.shorts-channel .subscribe { background: #fff; color: #000; text-shadow: none; border-radius: 2vh; padding: .5vh 1.4vh; font-weight: 600; font-size: 1.5vh; }
+.shorts-caption { font-size: 1.7vh; line-height: 1.35; }
+.shorts-caption .cap-title { font-weight: 600; }
+.shorts-caption .cap-desc { opacity: .85; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.v-desc.warn { color: #f2b45c; }

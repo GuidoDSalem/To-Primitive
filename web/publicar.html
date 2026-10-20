@@ -68,6 +68,35 @@
     <div id="published" class="items"></div>
   </main>
 
+  <div id="viewer" class="viewer" hidden>
+    <div class="phone-preview">
+      <video id="pvVideo" playsinline loop></video>
+      <div id="pvShorts" class="shorts-ui">
+        <div class="shorts-side"><span>♥</span><span>💬</span><span>↗</span><span>⋯</span></div>
+        <div class="shorts-bottom">
+          <div class="shorts-channel"><span class="avatar"></span><strong id="pvChannel">@tucanal</strong><span class="subscribe">Suscribirse</span></div>
+          <div id="pvCaption" class="shorts-caption"></div>
+        </div>
+      </div>
+    </div>
+    <div class="viewer-side">
+      <div id="pvPos" class="v-pos"></div>
+      <h2 id="pvTitle"></h2>
+      <p id="pvWhen" class="v-info"></p>
+      <p id="pvDesc" class="v-desc"></p>
+      <p id="pvTags" class="v-desc"></p>
+      <p id="pvWarn" class="v-desc warn"></p>
+      <p id="pvFile" class="v-info"></p>
+      <label class="check"><input id="pvShowUI" type="checkbox" checked> Ver como en Shorts (título y descripción encima)</label>
+      <div class="v-nav">
+        <button id="pvPrev">← Anterior</button>
+        <button id="pvNext">Siguiente →</button>
+      </div>
+      <p class="hint">← → otro video · Espacio pausa · F pantalla completa · Esc cerrar</p>
+      <button id="pvClose" class="v-close" title="Cerrar (Esc)">✕</button>
+    </div>
+  </div>
+
   <script src="publicar.js"></script>
 </body>
 </html>
