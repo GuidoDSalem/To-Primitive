@@ -403,3 +403,46 @@ func TestTikTokHintOn403(t *testing.T) {
 		t.Errorf("error %v", err)
 	}
 }
+
+// A published video sent back to the queue is a new post: it's uploaded
+// again. And a queued one noted as uploaded is uploaded again only if asked.
+func TestRepublish(t *testing.T) {
+	dir, p, _ := pubFixture(t)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(string) string { return "x" }
+	acc.ep = platformEndpoints{YouTubeAPI: fake.URL, TikTokAPI: fake.URL}
+	acc.tokens["youtube"] = &oauthToken{Access: "youtube-access-0", Refresh: "r", Expiry: time.Now().Add(time.Hour)}
+	p.up = &platformUploader{acc: acc, poll: time.Millisecond, wait: time.Second}
+	yt := &PostChoice{Platforms: []string{"youtube"}}
+
+	name, err := p.PublishWith(context.Background(), "b viejo.mp4", "a mano", yt)
+	if err != nil || f.ytUploads != 1 {
+		t.Fatalf("first: %v, %d uploads", err, f.ytUploads)
+	}
+	if err := p.Requeue(name); err != nil {
+		t.Fatal(err)
+	}
+	side := readSidecar(filepath.Join(dir, name))
+	if side["uploads"] != nil || side["previousUploads"] == nil {
+		t.Errorf("requeued sidecar %v", side)
+	}
+	if _, err := p.PublishWith(context.Background(), name, "a mano", yt); err != nil || f.ytUploads != 2 {
+		t.Fatalf("republished: %v, %d uploads", err, f.ytUploads)
+	}
+
+	// Noted as uploaded while still queued (a partial failure): skipped…
+	writeSidecar(filepath.Join(dir, "a medio.mp4"), map[string]any{"uploads": map[string]any{"youtube": map[string]any{"id": "old", "url": "https://youtube.com/shorts/old"}}})
+	if _, err := p.PublishWith(context.Background(), "a medio.mp4", "a mano", yt); err != nil || f.ytUploads != 2 {
+		t.Fatalf("skipped: %v, %d uploads", err, f.ytUploads)
+	}
+	p.Requeue("a medio.mp4")
+	writeSidecar(filepath.Join(dir, "a medio.mp4"), map[string]any{"uploads": map[string]any{"youtube": map[string]any{"id": "old"}}})
+	// …unless asked again.
+	again := &PostChoice{Platforms: []string{"youtube"}, Again: []string{"youtube"}}
+	if _, err := p.PublishWith(context.Background(), "a medio.mp4", "a mano", again); err != nil || f.ytUploads != 3 {
+		t.Fatalf("again: %v, %d uploads", err, f.ytUploads)
+	}
+}

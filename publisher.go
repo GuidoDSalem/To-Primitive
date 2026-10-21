@@ -57,6 +57,7 @@ type PublishSettings struct {
 // PostChoice is what is confirmed before publishing one video by hand.
 type PostChoice struct {
 	Platforms []string `json:"platforms"`
+	Again     []string `json:"again,omitempty"` // upload again where it's noted as already uploaded
 	YouTube   *struct {
 		Privacy string `json:"privacy"`
 		Title   string `json:"title"`
@@ -681,6 +682,13 @@ func (p *publisher) Requeue(name string) error {
 	m := readSidecar(path)
 	delete(m, "publishedAt")
 	delete(m, "result")
+	// Back in the queue it's a new post: what it was uploaded as before
+	// (and maybe deleted since) goes to the history, not in its way.
+	if u, ok := m["uploads"]; ok {
+		hist, _ := m["previousUploads"].([]any)
+		m["previousUploads"] = append(hist, u)
+		delete(m, "uploads")
+	}
 	if err := os.Rename(path, dest); err != nil {
 		return err
 	}

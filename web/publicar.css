@@ -176,3 +176,5 @@ code { font-size: 11px; color: var(--accent); }
 .post-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 700px) { .post-grid { grid-template-columns: 1fr; } .post-grid video { max-height: 40vh; } }
 .post-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: #ff8a8a22; border: 1px solid #ff8a8a; color: #ffb3b3; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.post-done { border: 1px solid #f2b45c88; background: #f2b45c14; border-radius: 10px; padding: 8px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.post-done a { color: var(--accent); overflow-wrap: anywhere; }

@@ -401,7 +401,8 @@ func (u *platformUploader) Upload(ctx context.Context, path string, item PubItem
 	}
 	var parts, failed []string
 	for _, p := range s.Platforms {
-		if r, ok := done[p]; ok {
+		again := s.Choice != nil && slices.Contains(s.Choice.Again, p)
+		if r, ok := done[p]; ok && !again {
 			parts = append(parts, describeUpload(p, r))
 			continue
 		}

@@ -533,7 +533,7 @@ const TT_PRIVACY = { PUBLIC_TO_EVERYONE: "Todos", FOLLOWER_OF_CREATOR: "Seguidor
 const postDialog = (() => {
   const dlg = $("postDialog");
   let item = null, info = null;
-  const state = { platforms: new Set(), yt: {}, tt: {} };
+  const state = { platforms: new Set(), again: new Set(), yt: {}, tt: {} };
   const el = (tag, props = {}, ...kids) => {
     const e = Object.assign(document.createElement(tag), props);
     e.append(...kids);
@@ -563,6 +563,7 @@ const postDialog = (() => {
     }
     const connected = (info.accounts ?? []).filter((a) => a.connected).map((a) => a.id);
     state.platforms = new Set((info.platforms ?? []).filter((p) => connected.includes(p)));
+    state.again = new Set();
     state.yt = { privacy: info.youtube.privacy || "public", title: info.youtube.title };
     // TikTok: nothing chosen for the person (privacy and interactions start empty).
     state.tt = { privacy: "", caption: info.tiktok?.caption ?? "", allowComment: false, allowDuet: false, allowStitch: false, disclose: false, brandOrganic: false, brandContent: false };
@@ -646,8 +647,28 @@ const postDialog = (() => {
     return box;
   }
 
+  // Where it's noted as already uploaded (e.g. after a failure elsewhere):
+  // it isn't uploaded there again unless asked.
+  function doneBox(p) {
+    const u = item.uploads?.[p];
+    if (!u) return null;
+    const box = el("div", { className: "post-done" });
+    box.append(el("div", {}, `Ya figura subido a ${PLATFORM_NAMES[p]}`, u.url ? ": " : ` (${u.id})`,
+      ...(u.url ? [el("a", { href: u.url, target: "_blank", rel: "noopener", textContent: u.url })] : [])));
+    box.append(check("Subirlo de nuevo (por ejemplo, si lo borraste)", state.again.has(p), (v) => {
+      v ? state.again.add(p) : state.again.delete(p);
+      render();
+    }));
+    if (!state.again.has(p)) box.append(el("div", { className: "kinds", textContent: "Si no lo marcás, no se vuelve a subir ahí." }));
+    return box;
+  }
+
   function render() {
     const parts = [];
+    for (const p of state.platforms) {
+      const d = doneBox(p);
+      if (d) parts.push(d);
+    }
     if (state.platforms.has("youtube")) parts.push(youtubeBox());
     if (state.platforms.has("tiktok")) parts.push(tiktokBox());
     if (!parts.length) parts.push(el("p", { className: "hint", textContent: "Sin plataformas marcadas: la publicación es simulada (se mueve a publicados/ sin subirse)." }));
@@ -675,7 +696,7 @@ const postDialog = (() => {
   }
 
   async function go() {
-    const choice = { platforms: [...state.platforms] };
+    const choice = { platforms: [...state.platforms], again: [...state.again] };
     if (state.platforms.has("youtube")) choice.youtube = { privacy: state.yt.privacy, title: state.yt.title };
     if (state.platforms.has("tiktok")) {
       const t = state.tt;
