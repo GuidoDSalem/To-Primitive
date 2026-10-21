@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Conectando TikTok</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+  <h1>Conectando TikTok…</h1>
+  <p>Volviendo a la app en tu computadora. Si no pasa nada, <a id="go" href="#">tocá acá</a>.</p>
+  <p class="meta">TikTok solo acepta direcciones https para volver después del login; esta página pasa el permiso a la app, que corre en <code>localhost</code>. No guarda ni envía nada a ningún otro lado.</p>
+</main>
+<script>
+  // The app on this computer (change the port here if it isn't 8080).
+  var app = "http://localhost:8080/api/publish/oauth/tiktok/callback";
+  var to = app + window.location.search;
+  document.getElementById("go").href = to;
+  window.location.replace(to);
+</script>
+</body>
+</html>
