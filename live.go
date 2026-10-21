@@ -144,6 +144,7 @@ func (s *LiveSession) loop(ctx context.Context) {
 	defer tick.Stop()
 
 	for {
+		yield()
 		// Ask for a frame (again every second, in case a request was lost).
 		s.mu.Lock()
 		paused := s.opts.Paused

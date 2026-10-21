@@ -8,6 +8,12 @@ dibujando forma por forma en el panel principal. Los videos se ajustan sobre alg
 prueba; después el servidor calcula *keyframes* y el navegador los anima como motion graphics
 vectoriales, a cualquier resolución, y los exporta a MP4, Lottie o JSON.
 
+## Demo en el navegador
+
+<https://guidodsalem.github.io/To-Primitive/app/>: el editor de imágenes, la grabación y la cámara en vivo, sin instalar nada. El mismo servidor en Go corre compilado a WebAssembly dentro de un Web Worker (`wasm.go`), y `demo/demo.js` le pasa las llamadas `fetch` y `EventSource` de la página. Todo se calcula en tu dispositivo, en un solo hilo, así que va más lento que el servidor. Video no está, porque necesita `ffmpeg`.
+
+Para regenerarla (va a `docs/app/`, que publica GitHub Pages): `./demo/build.sh`.
+
 ## Uso
 
 ```sh

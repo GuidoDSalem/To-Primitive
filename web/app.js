@@ -996,10 +996,17 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("keyup", (e) => { if (e.code === "Space") showOriginal(false); });
 
 for (const b of document.querySelectorAll("[data-export]")) {
-  b.addEventListener("click", () => {
+  b.addEventListener("click", async () => {
     const n = Math.min(state.params.shapes, state.shapes.length);
     const size = $("exportSize").value || 1024;
-    location.href = `/api/sessions/${state.id}/export?format=${b.dataset.export}&size=${size}&n=${n}`;
+    // Download through fetch rather than navigating, so it also works in the
+    // browser-only demo, where the server runs in a worker.
+    const res = await fetch(`/api/sessions/${state.id}/export?format=${b.dataset.export}&size=${size}&n=${n}`);
+    if (!res.ok) return alert(await res.text());
+    const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || `to-primitive.${b.dataset.export}`;
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await res.blob()), download: name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
 }
 

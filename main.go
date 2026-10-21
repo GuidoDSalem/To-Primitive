@@ -6,17 +6,14 @@ package main
 
 import (
 	"crypto/rand"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -31,9 +28,6 @@ import (
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/webp"
 )
-
-//go:embed web
-var webFS embed.FS
 
 const (
 	maxUpload   = 64 << 20
@@ -57,22 +51,13 @@ type server struct {
 	lives    map[string]*LiveSession
 }
 
-func main() {
-	addr := flag.String("addr", envOr("ADDR", ":8080"), "listen address")
-	dataDir := flag.String("data", envOr("DATA_DIR", filepath.Join(os.TempDir(), "to-primitive")), "directory for uploaded videos")
-	flag.Parse()
+func newServer(dataDir string) *server {
+	return &server{dataDir: dataDir, sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
+}
 
-	// Videos don't survive a restart (sessions live in memory), so start clean.
-	os.RemoveAll(*dataDir)
-	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
-		log.Fatal(err)
-	}
-
-	srv := &server{dataDir: *dataDir, sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
-	web, _ := fs.Sub(webFS, "web")
-
+// routes returns the API handlers; the native server adds the static files.
+func (srv *server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.Handle("GET /", http.FileServerFS(web))
 	mux.HandleFunc("POST /api/sessions", srv.create)
 	mux.HandleFunc("GET /api/sessions/{id}/events", srv.withSession(srv.events))
 	mux.HandleFunc("PUT /api/sessions/{id}/params", srv.withSession(srv.params))
@@ -93,9 +78,7 @@ func main() {
 	mux.HandleFunc("POST /api/live/{id}/frame", srv.withLive(srv.liveFrame))
 	mux.HandleFunc("PUT /api/live/{id}/params", srv.withLive(srv.liveParams))
 	mux.HandleFunc("DELETE /api/live/{id}", srv.withLive(srv.closeLive))
-
-	log.Printf("To-Primitive listening on %s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	return mux
 }
 
 func envOr(key, def string) string {

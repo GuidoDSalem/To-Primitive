@@ -185,6 +185,7 @@ func (s *Session) loop(ctx context.Context, r *run, model *primitive.Model, p Pa
 		before := len(model.Shapes)
 		model.Step(primitive.ShapeType(p.Mode), p.Alpha, p.Repeat)
 		s.stepMu.Unlock()
+		yield()
 
 		s.mu.Lock()
 		if ctx.Err() != nil {

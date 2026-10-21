@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>To-Primitive</h1>
+      <p class="sub">Imágenes y videos reconstruidos con formas geométricas</p>
+    </header>
+
+    <section>
+      <h2>Archivo</h2>
+      <label class="button wide">
+        <input id="file" type="file" accept="image/*,video/*" hidden>
+        Subir imagen o video…
+      </label>
+      <button id="liveStart" class="wide" style="margin-top:8px">Usar cámara (en vivo)</button>
+    </section>
+
+    <section id="videoSection" hidden>
+      <h2>Video</h2>
+      <p id="videoInfo" class="hint"></p>
+      <div class="field">
+        <label for="timeline">Frames de prueba <output id="timeOut"></output></label>
+        <input id="timeline" type="range" min="0" max="1" step="0.01" value="0">
+        <img id="scrub" class="scrub" alt="">
+        <button id="addFrame" class="wide">Agregar este frame</button>
+        <p class="hint">Ajustá los parámetros sobre algunos frames y después renderizá el video completo.</p>
+      </div>
+      <div id="frames" class="frames"></div>
+    </section>
+
+    <fieldset id="controls" disabled>
+      <section>
+        <h2>Formas</h2>
+        <div class="field">
+          <label for="shapes">Cantidad <output id="shapesOut"></output></label>
+          <input id="shapes" type="range" min="1" max="2000" value="200">
+          <p class="hint">Cambiarla no reinicia: agrega o quita formas en vivo.</p>
+        </div>
+        <div class="field">
+          <label>Tipo</label>
+          <div id="mode" class="chips">
+            <button data-value="1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 21 20H3z"/></svg>Triángulo</button>
+            <button data-value="2"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12"/></svg>Rectángulo</button>
+            <button data-value="5"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="10" transform="rotate(-25 12 12)"/></svg>Rect. rotado</button>
+            <button data-value="3"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="6"/></svg>Elipse</button>
+            <button data-value="7"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/></svg>Elipse rotada</button>
+            <button data-value="4"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>Círculo</button>
+            <button data-value="6"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18Q12 -2 21 16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>Bézier</button>
+            <button data-value="8"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9 11 3l9 5-2 11-10 2z"/></svg>Polígono</button>
+            <button data-value="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20 9 9l6 11z"/><circle cx="17" cy="8" r="5"/></svg>Combinado</button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Algoritmo</h2>
+        <div class="field">
+          <label for="alpha">Opacidad <output id="alphaOut"></output></label>
+          <input id="alpha" type="range" min="1" max="255" value="128">
+          <label class="check"><input id="alphaAuto" type="checkbox"> Automática (por forma)</label>
+        </div>
+        <div class="field">
+          <label for="repeat">Repetición <output id="repeatOut"></output></label>
+          <input id="repeat" type="range" min="0" max="10" value="0">
+          <p class="hint">Formas extra por iteración con búsqueda reducida.</p>
+        </div>
+        <div class="field">
+          <label for="inputSize">Resolución de trabajo <output id="inputSizeOut"></output></label>
+          <input id="inputSize" type="range" min="64" max="512" step="16" value="256">
+          <p class="hint">Más alta = más detalle, pero más lento.</p>
+        </div>
+        <div class="field">
+          <label for="background">Fondo</label>
+          <div class="row">
+            <input id="background" type="color" value="#000000">
+            <label class="check"><input id="bgAuto" type="checkbox" checked> Color promedio</label>
+          </div>
+        </div>
+        <div class="row">
+          <button id="pause" class="wide">Pausar</button>
+          <button id="restart" class="wide" title="Nueva corrida con los mismos parámetros">Regenerar</button>
+        </div>
+      </section>
+
+      <section id="liveSection" hidden>
+        <h2>En vivo</h2>
+        <div class="field">
+          <label for="liveBudget">Tiempo por keyframe <output id="liveBudgetOut"></output></label>
+          <input id="liveBudget" type="range" min="40" max="400" step="10" value="120">
+          <p class="hint">Más tiempo = más calidad y menos keyframes por segundo. Con pocas formas y resolución baja va más fluido.</p>
+        </div>
+        <div class="field">
+          <label for="liveAdapt">Seguimiento del movimiento <output id="liveAdaptOut"></output></label>
+          <input id="liveAdapt" type="range" min="0" max="200" step="5" value="30">
+        </div>
+        <div class="field">
+          <label for="liveInterp">Interpolación</label>
+          <select id="liveInterp">
+            <option value="smooth">Suave</option>
+            <option value="linear">Lineal</option>
+            <option value="step">Sin interpolar</option>
+          </select>
+        </div>
+        <label class="check"><input id="liveFlow" type="checkbox" checked> Flujo óptico (las formas siguen el movimiento)</label>
+        <div class="row">
+          <label class="check"><input id="liveMirror" type="checkbox" checked> Espejo</label>
+          <label class="check"><input id="liveShowCam" type="checkbox" checked> Ver cámara</label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="liveRec" class="wide primary">● Grabar</button>
+          <button id="liveStop" class="wide">Detener cámara</button>
+        </div>
+        <p id="liveStats" class="hint"></p>
+      </section>
+
+      <section id="recordSection" hidden>
+        <h2>Grabar construcción</h2>
+        <div class="field">
+          <label>Estilo</label>
+          <div id="recStyle" class="chips">
+            <button data-value="2d" class="on">Plano (2D)</button>
+            <button data-value="3d">Escena 3D</button>
+          </div>
+        </div>
+        <div id="rec3d" hidden>
+          <div class="field">
+            <label for="sceneDepthMode">Profundidad de cada forma</label>
+            <select id="sceneDepthMode"></select>
+          </div>
+          <div class="field">
+            <label for="sceneDepth">Separación en profundidad <output id="sceneDepthOut"></output></label>
+            <input id="sceneDepth" type="range" min="0" max="2" step="0.05" value="0.8">
+            <p class="hint">De frente siempre se ve la imagen exacta; la separación se nota al mover la cámara.</p>
+          </div>
+          <div class="field">
+            <label for="sceneAssembly">Cómo se arman</label>
+            <select id="sceneAssembly"></select>
+          </div>
+          <div class="field">
+            <label for="sceneScatter">Distancia del recorrido <output id="sceneScatterOut"></output></label>
+            <input id="sceneScatter" type="range" min="0.1" max="2" step="0.05" value="1">
+          </div>
+          <div class="field">
+            <label for="sceneStagger">Escalonado <output id="sceneStaggerOut"></output></label>
+            <input id="sceneStagger" type="range" min="0" max="1" step="0.05" value="0.6">
+            <p class="hint">0 = todas viajan juntas; 1 = llegan una detrás de otra (en el orden de aparición).</p>
+          </div>
+          <div class="field">
+            <label for="sceneCamera">Cámara</label>
+            <select id="sceneCamera"></select>
+          </div>
+          <div class="field">
+            <label for="sceneAngle">Ángulo de cámara <output id="sceneAngleOut"></output></label>
+            <input id="sceneAngle" type="range" min="0" max="80" step="1" value="35">
+          </div>
+        </div>
+        <div class="field">
+          <label for="recDirection">Dirección</label>
+          <select id="recDirection"></select>
+        </div>
+        <div class="field">
+          <label for="recOrder">Orden de aparición</label>
+          <select id="recOrder"></select>
+        </div>
+        <div class="field">
+          <label for="recCurve">Velocidad (curva de easing)</label>
+          <select id="recCurve"></select>
+          <p class="hint" id="curveHint"></p>
+        </div>
+        <div id="rec2d">
+          <div class="field">
+            <label for="recEffect">Efecto de aparición</label>
+            <select id="recEffect"></select>
+          </div>
+          <div class="field">
+            <label for="recEffectTime">Duración del efecto <output id="recEffectTimeOut"></output></label>
+            <input id="recEffectTime" type="range" min="0.05" max="3" step="0.05" value="0.6">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field wide">
+            <label for="recDuration">Duración (s)</label>
+            <input id="recDuration" type="number" min="0.5" max="120" step="0.5" value="6">
+          </div>
+          <div class="field wide">
+            <label for="recHoldStart">Pausa inicio</label>
+            <input id="recHoldStart" type="number" min="0" max="10" step="0.25" value="0.5">
+          </div>
+          <div class="field wide">
+            <label for="recHoldEnd">Pausa final</label>
+            <input id="recHoldEnd" type="number" min="0" max="10" step="0.25" value="2">
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <div class="field wide">
+            <label for="recFps">FPS</label>
+            <select id="recFps"><option>24</option><option selected>30</option><option>60</option></select>
+          </div>
+          <div class="field wide">
+            <label for="recSize">Resolución</label>
+            <select id="recSize">
+              <option value="1280">720p</option>
+              <option value="1920" selected>1080p</option>
+              <option value="2560">1440p</option>
+              <option value="3840">4K</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="recPreview" class="wide">Ver grabación</button>
+          <button id="recExport" class="wide primary">Exportar MP4</button>
+        </div>
+        <button id="recCancel" class="wide" hidden>Cancelar exportación</button>
+        <progress id="recProgress" max="1" value="0" hidden></progress>
+        <p id="recStatus" class="hint">Usa las formas visibles en el editor. Los cambios se ven al instante en la pestaña “Grabación”.</p>
+      </section>
+
+      <section id="renderSection" hidden>
+        <h2>Animación</h2>
+        <div class="field">
+          <label for="kfps">Keyframes por segundo</label>
+          <select id="kfps"></select>
+          <p class="hint">Cuántos frames del video se calculan; el movimiento entre ellos se interpola. Menos = más rápido de calcular.</p>
+        </div>
+        <div class="field">
+          <label for="adapt">Seguimiento del movimiento <output id="adaptOut"></output></label>
+          <input id="adapt" type="range" min="0" max="300" step="10" value="60">
+          <label class="check"><input id="videoFlow" type="checkbox" checked> Flujo óptico (las formas siguen el movimiento)</label>
+          <p class="hint">Cada keyframe parte de las formas del anterior. Más alto = las formas siguen mejor el movimiento; 0 = quedan fijas y solo cambian de color.</p>
+        </div>
+        <div class="row">
+          <button id="compute" class="wide primary">Calcular animación</button>
+          <button id="cancelCompute" class="wide" hidden>Cancelar</button>
+        </div>
+        <progress id="progress" max="1" value="0" hidden></progress>
+        <p id="computeStatus" class="hint"></p>
+
+        <div class="field" style="margin-top:14px">
+          <label for="interp">Interpolación</label>
+          <select id="interp">
+            <option value="smooth">Suave (curva continua)</option>
+            <option value="linear">Lineal</option>
+            <option value="step">Sin interpolar (saltos)</option>
+          </select>
+          <p class="hint">Se aplica al instante, sin recalcular.</p>
+        </div>
+      </section>
+
+      <section id="exportAnimSection" hidden>
+        <h2>Exportar animación</h2>
+        <div class="row">
+          <div class="field wide">
+            <label for="outFps">FPS</label>
+            <select id="outFps">
+              <option>24</option>
+              <option selected>30</option>
+              <option>60</option>
+            </select>
+          </div>
+          <div class="field wide">
+            <label for="outSize">Resolución</label>
+            <select id="outSize">
+              <option value="1280">720p</option>
+              <option value="1920" selected>1080p</option>
+              <option value="2560">1440p</option>
+              <option value="3840">4K</option>
+            </select>
+          </div>
+        </div>
+        <label class="check"><input id="audio" type="checkbox" checked> Mantener audio (MP4)</label>
+        <div class="row" style="margin-top:10px">
+          <button data-anim-export="mp4" class="wide primary">MP4</button>
+          <button data-anim-export="lottie" class="wide" title="JSON para After Effects (Bodymovin) o la web">Lottie</button>
+          <button data-anim-export="json" class="wide" title="Keyframes crudos">JSON</button>
+        </div>
+        <button id="cancelExport" class="wide" hidden>Cancelar exportación</button>
+        <progress id="exportProgress" max="1" value="0" hidden></progress>
+        <p id="exportStatus" class="hint"></p>
+      </section>
+
+      <section>
+        <h2 id="exportTitle">Exportar</h2>
+        <div class="field">
+          <label for="exportSize">Tamaño (lado mayor, px)</label>
+          <input id="exportSize" type="number" min="16" max="8192" value="1024">
+        </div>
+        <div class="row">
+          <button data-export="png" class="wide">PNG</button>
+          <button data-export="svg" class="wide">SVG</button>
+          <button data-export="gif" class="wide">GIF</button>
+        </div>
+      </section>
+    </fieldset>
+
+    <footer id="stats">Sin imagen</footer>
+  </aside>
+
+  <main id="stage">
+    <nav id="tabs" hidden>
+      <button data-tab="editor" class="on">Editor</button>
+      <button data-tab="render" id="playerTab">Animación</button>
+    </nav>
+    <div id="drop">
+      <p><strong>Arrastrá una imagen acá</strong><br>o usá “Subir imagen…”</p>
+    </div>
+    <div id="view" hidden>
+      <svg id="out" xmlns="http://www.w3.org/2000/svg">
+        <defs><clipPath id="clip"><rect id="clipRect" x="0" y="0"/></clipPath></defs>
+        <g clip-path="url(#clip)"><rect id="bg" x="0" y="0"/><g id="shapesG" transform="translate(0.5 0.5)"></g></g>
+      </svg>
+      <img id="original" alt="Original" hidden>
+    </div>
+    <div id="renderView" hidden>
+      <div id="playerBox"><canvas id="player"></canvas></div>
+      <div id="playerBar">
+        <button id="play" title="Reproducir / pausar (barra espaciadora)">▶</button>
+        <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+        <span id="clock">0:00 / 0:00</span>
+        <label class="check" id="soundLabel"><input id="sound" type="checkbox" checked> Audio</label>
+      </div>
+      <p id="renderEmpty" class="empty">Todavía no hay animación. Ajustá los parámetros y tocá “Calcular animación”.</p>
+      <video id="sourceVideo" preload="auto" playsinline hidden></video>
+    </div>
+    <div id="liveView" hidden>
+      <div id="liveBox"><canvas id="liveCanvas"></canvas></div>
+      <video id="liveCam" muted playsinline></video>
+    </div>
+    <button id="compare" hidden title="Mantené apretado (o la barra espaciadora) para ver el original">Ver original</button>
+  </main>
+
+  <script src="demo.js"></script>
+
+  <script src="mp4.js"></script>
+  <script src="motion.js"></script>
+  <script src="build.js"></script>
+  <script src="scene3d.js"></script>
+  <script src="picker.js"></script>
+  <script src="live.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
