@@ -670,6 +670,7 @@ const postDialog = (() => {
   function validate() {
     const p = problem();
     $("postGo").disabled = !!p;
+    $("postStatus").className = "hint";
     $("postStatus").textContent = p;
   }
 
@@ -682,14 +683,17 @@ const postDialog = (() => {
     }
     $("postGo").disabled = true;
     $("postCancel").disabled = true;
+    $("postStatus").className = "hint";
     $("postStatus").textContent = "Publicando… (subiendo el video, puede tardar un poco)";
     try {
       show(await api(`/api/publish/queue/${enc(item.name)}/now`, { method: "POST", json: choice }));
       close();
     } catch (e) {
-      $("postStatus").textContent = "No se publicó: " + e.message;
       $("postCancel").disabled = false;
       validate();
+      // After validate(), which would clear it: the error stays in sight.
+      $("postStatus").className = "post-error";
+      $("postStatus").textContent = "No se publicó: " + e.message;
       refresh();
     }
   }

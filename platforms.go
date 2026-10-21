@@ -556,12 +556,27 @@ func (a *accounts) tiktokCall(ctx context.Context, path, access string, body, ou
 		return err
 	}
 	if ans.Error.Code != "" && ans.Error.Code != "ok" {
+		if hint := tiktokHints[ans.Error.Code]; hint != "" {
+			return fmt.Errorf("%s (%s)", hint, ans.Error.Code)
+		}
 		return fmt.Errorf("%s: %s", ans.Error.Code, ans.Error.Message)
 	}
 	if out != nil {
 		return json.Unmarshal(ans.Data, out)
 	}
 	return nil
+}
+
+// tiktokHints says what to do about TikTok's most common refusals.
+var tiktokHints = map[string]string{
+	"unaudited_client_can_only_post_to_private_accounts": "mientras TikTok no audite la app, la cuenta tiene que ser privada: en TikTok, Perfil → Configuración y privacidad → Privacidad → Cuenta privada, y probá de nuevo",
+	"privacy_level_option_mismatch":                      "TikTok no acepta esa privacidad para esta cuenta: elegí otra en la ventana",
+	"spam_risk_too_many_posts":                           "TikTok limita cuántos videos se publican por día desde una app: probá más tarde",
+	"spam_risk_user_banned_from_posting":                 "TikTok no deja publicar a esta cuenta por ahora",
+	"reached_active_user_cap":                            "la app llegó al límite de usuarios que TikTok permite sin auditoría",
+	"access_token_invalid":                               "el permiso de TikTok venció o se revocó: desconectá y conectá de nuevo la cuenta",
+	"scope_not_authorized":                               "falta el permiso video.publish: revisá los scopes de la app en TikTok y conectá de nuevo",
+	"rate_limit_exceeded":                                "demasiados pedidos seguidos a TikTok: esperá un minuto y probá de nuevo",
 }
 
 type creatorInfo struct {

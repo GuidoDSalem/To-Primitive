@@ -175,3 +175,4 @@ code { font-size: 11px; color: var(--accent); }
 .post-inter, .post-disclose { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .post-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 700px) { .post-grid { grid-template-columns: 1fr; } .post-grid video { max-height: 40vh; } }
+.post-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: #ff8a8a22; border: 1px solid #ff8a8a; color: #ffb3b3; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
