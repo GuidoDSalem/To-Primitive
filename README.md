@@ -263,7 +263,7 @@ Con la app en modo *Prueba*, Google puede pedir que vuelvas a conectar cada tant
 
 (Si TikTok aceptara `http://localhost:8080/api/publish/oauth/tiktok/callback`, por ejemplo en una app *Desktop*, dejá `TIKTOK_REDIRECT_URI` vacío: la app vuelve directo y usa PKCE.)
 
-**Páginas públicas (GitHub Pages).** La carpeta `docs/` tiene la presentación, los términos (`terms.html`), la política de privacidad (`privacy.html`) y la página de retorno de TikTok. Para publicarlas: en GitHub, *Settings → Pages → Build and deployment*: *Deploy from a branch*, la rama y la carpeta `/docs`. Quedan en `https://guidodsalem.github.io/To-Primitive/`.
+**Páginas públicas (GitHub Pages).** La carpeta `docs/` tiene la presentación, los términos (`terms.html`), la política de privacidad (`privacy.html`) y la página de retorno de TikTok. Para publicarlas: en GitHub, *Settings → Pages → Build and deployment*: *Deploy from a branch*, rama `main` y carpeta `/docs`. Quedan en `https://guidodsalem.github.io/To-Primitive/`.
 
 **Importante:** hasta que TikTok audite la app, todo lo que se publique por la API queda **privado** ("Solo yo"), y TikTok puede pedir que la cuenta sea privada. La app lo detecta y publica como "Solo yo" (después lo cambiás en TikTok). Para publicar en público hay que pedir la auditoría desde el portal de desarrolladores.
 
