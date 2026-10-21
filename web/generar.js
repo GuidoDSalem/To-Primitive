@@ -219,7 +219,11 @@ function waitingCard(w) {
   });
   const foot = document.createElement("div");
   foot.className = "foot";
-  foot.append(go, count, all, "Idiomas", langs, drop);
+  const byHand = Object.assign(document.createElement("a"), {
+    className: "button", href: `reels.html?src=${enc(w.name)}`, textContent: "Editarlo yo",
+    title: "Abrirlo en el editor de reels y armarlo a mano; el reel va a Revisar (o directo a la cola)",
+  });
+  foot.append(go, count, all, "Idiomas", langs, byHand, drop);
   body.append(head, grid, foot);
   card.append(thumb, body);
   update();

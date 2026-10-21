@@ -343,6 +343,16 @@ func (srv *server) reelMux(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"name": name})
 		return
 	}
+	// manual=<source>: a reel made by hand from a new source (to the generated ones).
+	if src := r.FormValue("manual"); src != "" && srv.gen != nil {
+		name, err := srv.gen.SaveManual(src, out, meta)
+		if err != nil {
+			pubError(w, err)
+			return
+		}
+		writeJSON(w, map[string]string{"name": name})
+		return
+	}
 	// job=<id>: a reel the generator asked for (saved in its output folder).
 	if job := r.FormValue("job"); job != "" && srv.gen != nil {
 		name, err := srv.gen.Complete(job, out, meta)

@@ -172,12 +172,12 @@ func (srv *server) genDismiss(w http.ResponseWriter, r *http.Request, g *generat
 	srv.genOverview(w, r, g)
 }
 
-// genInput serves a waiting source (to see it while choosing).
+// genInput serves a source (to see it while choosing, or edit it by hand).
 func (srv *server) genInput(w http.ResponseWriter, r *http.Request, g *generator) {
-	name := r.PathValue("name")
-	if !validSourceName(name) {
-		http.Error(w, "nombre inválido", http.StatusBadRequest)
+	path, err := g.sourcePath(r.PathValue("name"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	http.ServeFile(w, r, filepath.Join(g.in, name))
+	http.ServeFile(w, r, path)
 }

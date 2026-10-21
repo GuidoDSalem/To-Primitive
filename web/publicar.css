@@ -141,5 +141,5 @@ code { font-size: 11px; color: var(--accent); }
 .wcard .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .wcard .foot input[type=text] { width: 110px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
 .wcard .foot .n { color: var(--muted); font-size: 12px; }
-.wcard .foot button { font-size: 13px; padding: 5px 10px; margin: 0; }
+.wcard .foot button, .wcard .foot a.button { font-size: 13px; padding: 5px 10px; margin: 0; }
 .wcard .foot button:disabled { opacity: .45; cursor: not-allowed; }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -123,5 +124,52 @@ func TestChooseTemplates(t *testing.T) {
 	g.scan()
 	if len(g.state.Waiting) != 0 {
 		t.Error("a dismissed source came back")
+	}
+}
+
+// A waiting source made by hand: the reel goes to the generated ones,
+// already refined, and the source stops waiting.
+func TestManual(t *testing.T) {
+	needFFmpeg(t)
+	g, dir, _ := genFixture(t)
+	g.state.Settings.Enabled, g.state.Settings.SkipChoice = true, false
+	if _, err := g.Upload(bytes.NewReader([]byte("png")), "mona_lisa.png"); err != nil {
+		t.Fatal(err)
+	}
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	os.MkdirAll(srv.dataDir, 0o755)
+	srv.gen = g
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	res, _ := http.Get(ts.URL + "/api/auto/inputs/mona_lisa.png/spec")
+	var spec struct{ Kind, Title, Lang string }
+	json.NewDecoder(res.Body).Decode(&spec)
+	if spec.Kind != "image" || spec.Title != "Mona lisa" || spec.Lang != "es" {
+		t.Errorf("spec %+v", spec)
+	}
+	video := silentVideo(t, t.TempDir(), 1)
+	body, ct := multipartBody(t, map[string]string{"video": video}, map[string]string{"manual": "mona_lisa.png", "meta": `{"template":"reveal","lang":"es","phrases":[{"role":"closing","text":"¿Cuál sigue?"}]}`})
+	res, err := http.Post(ts.URL+"/api/reels/mux", ct, body)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("save: %v %v", err, res.Status)
+	}
+	var out struct{ Name string }
+	json.NewDecoder(res.Body).Decode(&out)
+	if out.Name != "mona_lisa · Revelado · es.mp4" {
+		t.Errorf("name %q", out.Name)
+	}
+	side := readSidecar(filepath.Join(g.out, out.Name))
+	if side["stage"] != stageRefined || side["title"] != "Mona lisa" || side["source"] != "mona_lisa.png" || side["manual"] != true {
+		t.Errorf("sidecar %v", side)
+	}
+	if len(g.state.Waiting) != 0 {
+		t.Error("still waiting")
+	}
+	if _, err := os.Stat(filepath.Join(g.in, processedDir, "mona_lisa.png")); err != nil {
+		t.Errorf("source not in procesados: %v", err)
+	}
+	// Still reachable to refine it later.
+	if res, _ := http.Get(ts.URL + "/api/review/" + url.PathEscape(out.Name) + "/source"); res.StatusCode != 200 {
+		t.Errorf("source for refining: %d", res.StatusCode)
 	}
 }

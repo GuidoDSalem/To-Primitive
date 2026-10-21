@@ -170,6 +170,7 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/auto/settings", srv.withGenerator(srv.genSettings))
 	mux.HandleFunc("POST /api/auto/inputs", srv.withGenerator(srv.genUpload))
 	mux.HandleFunc("GET /api/auto/inputs/{name}", srv.withGenerator(srv.genInput))
+	mux.HandleFunc("GET /api/auto/inputs/{name}/spec", srv.withGenerator(srv.genInputSpec))
 	mux.HandleFunc("POST /api/auto/inputs/{name}/start", srv.withGenerator(srv.genStart))
 	mux.HandleFunc("POST /api/auto/inputs/{name}/dismiss", srv.withGenerator(srv.genDismiss))
 	mux.HandleFunc("GET /api/auto/jobs/{id}", srv.withGenerator(srv.genJob))

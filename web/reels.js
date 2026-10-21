@@ -1560,6 +1560,12 @@ $("export").addEventListener("click", async () => {
   delete $("expStatus").dataset.done;
   const started = performance.now();
   try {
+    if (MANUAL) {
+      const done = await saveManual(exporting.signal);
+      setExport(null, `${done} en ${((performance.now() - started) / 1000).toFixed(1)} s.`);
+      $("expStatus").dataset.done = "1";
+      return;
+    }
     if (REFINE) {
       // The reel in every language, each saved over its version.
       const done = await saveRefined(exporting.signal);
@@ -1668,8 +1674,11 @@ const query = new URLSearchParams(location.search);
 const EDIT = query.get("edit");
 const LIB = query.get("lib");
 const REFINE = EDIT || LIB || query.get("refine");
+// reels.html?src=<name>: a new source of the generator, made by hand; the
+// reel saved goes to the generated ones, already refined.
+const MANUAL = query.get("src");
 const reelAPI = (name) => (LIB ? "/api/reels/" : EDIT ? "/api/publish/queue/" : "/api/review/") + encodeURIComponent(name);
-const exportLabel = () => (EDIT ? "Guardar cambios en la cola" : LIB ? "Guardar cambios en la biblioteca" : REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
+const exportLabel = () => (MANUAL ? "Guardar reel" : EDIT ? "Guardar cambios en la cola" : LIB ? "Guardar cambios en la biblioteca" : REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
 
 // Load a source from a URL into the editor (a WebM copy if this browser
 // can't play the video).
@@ -1882,6 +1891,43 @@ async function runRefine(name) {
   }
 }
 if (REFINE) runRefine(REFINE);
+
+// ---------- making a new source by hand ----------
+
+async function saveManual(signal) {
+  const comp = composition();
+  if (!comp) throw new Error("el reel no está listo");
+  const { name } = await encodeAndSend(comp, { manual: MANUAL }, signal, setExport);
+  $("refineState").textContent = "· guardado ✓";
+  if (!$("refineQueue").checked) return `Guardado en Generados como ${name}: está en Revisar, listo para mandarlo a la cola`;
+  try {
+    await api(`/api/review/${encodeURIComponent(name)}/queue`, { method: "POST" });
+    $("refineState").textContent = "· guardado y en la cola ✓";
+    return `Guardado y en la cola de publicación (${name})`;
+  } catch (e) {
+    return `Guardado en Generados (${name}), pero no pasó a la cola: ${e.message}. Mandalo desde Revisar`;
+  }
+}
+
+async function runManual(name) {
+  $("refineBar").hidden = false;
+  $("refineVerb").textContent = "Haciendo a mano";
+  $("refineName").textContent = name;
+  $("refineLangs").hidden = $("refineHint").hidden = true;
+  $("refineQueue").nextSibling.textContent = " Al guardar, mandarlo a la cola de publicación";
+  $("refineBack").textContent = "← volver a Generar";
+  $("refineBack").href = "generar.html";
+  $("export").textContent = exportLabel();
+  try {
+    const spec = await api(`/api/auto/inputs/${encodeURIComponent(name)}/spec`);
+    reel.lang = spec.lang || reel.lang;
+    $("refineState").textContent = `· ${spec.kind === "video" ? "video" : "foto"} · ${reel.lang.toUpperCase()}`;
+    await loadFromURL(`/api/auto/inputs/${encodeURIComponent(name)}`, spec.name, spec.type, spec.kind, null);
+  } catch (e) {
+    $("refineState").textContent = "· no se pudo abrir: " + e.message;
+  }
+}
+if (MANUAL) runManual(MANUAL);
 
 // ---------- automatic mode ----------
 
