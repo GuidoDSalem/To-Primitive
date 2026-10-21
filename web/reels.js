@@ -25,6 +25,7 @@ const reel = {
   framing: { mode: "fill", zoom: 1, px: 0.5, py: 0.5 },
   template: "auto",
   duration: { preset: "15", free: 20 },
+  ending: null,     // seconds the original is shown at the end (null: the template's)
   audio: { mode: "none", file: null, url: null }, // mode: "none" | "source" | "file"
   phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
   touched: new Set(), // settings changed by hand: a template's base doesn't override them
@@ -163,11 +164,12 @@ function composition(id = templateId()) {
   const vs = spec.variants ? variantImages(spec.variants) : null;
   if (spec.variants && !vs) return null;
   const build = buildOpts(), interp = $("interp").value;
-  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp, vs ? variants.version : 0, reel.lang]);
+  const ending = spec.ending ? reel.ending : null;
+  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp, vs ? variants.version : 0, reel.lang, ending]);
   const cache = (reel.gen.comps ??= new Map());
   if (!cache.has(key)) {
     cache.set(key, Templates.make(id, {
-      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, variants: vs, duration: reelSeconds(), build, interp, lang: reel.lang,
+      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, variants: vs, duration: reelSeconds(), build, interp, lang: reel.lang, ending,
       paintOriginal: (ctx, x, y, w, h) => paintOriginal(ctx, w, h, true, x, y),
     }));
   }
@@ -904,6 +906,17 @@ $("durPreset").addEventListener("click", (e) => {
   refreshUI();
   player.seek(0);
 });
+$("ending").addEventListener("input", () => {
+  reel.ending = +$("ending").value;
+  refreshUI();
+  if (!player.playing) player.draw();
+});
+$("endingAuto").addEventListener("input", () => {
+  reel.ending = $("endingAuto").checked ? null : +$("ending").value;
+  refreshUI();
+  if (!player.playing) player.draw();
+});
+
 $("durFree").addEventListener("input", () => {
   reel.duration.free = +$("durFree").value;
   reel.touched.add("duration");
@@ -1397,6 +1410,19 @@ function refreshUI() {
   } else {
     $("durInfo").textContent = has ? `El reel dura ${reelSeconds()} s; los tiempos del template se ajustan solos.` : "";
   }
+  // How long the original shows at the end (templates that end with it).
+  const endsWithOriginal = !!Templates.LIST[templateId()]?.ending;
+  $("endingBox").hidden = !endsWithOriginal || !has;
+  if (endsWithOriginal && has) {
+    const comp = composition();
+    const length = comp?.duration ?? reelSeconds();
+    $("ending").max = Math.max(1, Math.floor(length * 0.85 * 2) / 2);
+    $("endingAuto").checked = reel.ending == null;
+    $("ending").disabled = reel.ending == null;
+    const shown = reel.ending ?? (comp && Number.isFinite(comp.originalFrom) ? comp.duration - comp.originalFrom : null);
+    if (reel.ending == null && shown != null) $("ending").value = Math.round(shown * 2) / 2;
+    $("endingOut").textContent = shown == null ? "" : `${shown.toFixed(1)} s` + (reel.ending == null ? " (automático)" : "");
+  }
 
   // Audio and export.
   const canSource = !!reel.video?.info.hasAudio;
@@ -1477,6 +1503,7 @@ function reelMeta(comp, res, seconds) {
     v: 1,
     template: comp.id, templateChoice: reel.template,
     duration: Math.round(comp.duration * 100) / 100, durationChoice: { ...reel.duration },
+    ending: reel.ending, originalFrom: Number.isFinite(comp.originalFrom) ? Math.round(comp.originalFrom * 100) / 100 : null,
     source: { kind: reel.kind, name: reel.name, size: sourceSize(), portion: reel.kind === "video" ? { ...reel.portion } : null },
     ...(reel.kind === "video" ? { testFrames: reel.testFrames.slice(), testFrame: testTime() } : {}),
     framing: { ...reel.framing }, crop: crop(),
@@ -1728,6 +1755,7 @@ function restoreRecord(m) {
     if (a.flow !== undefined) $("videoFlow").checked = a.flow;
     if (a.interp) $("interp").value = a.interp;
   }
+  reel.ending = m.ending ?? null;
   if (m.durationChoice) {
     reel.duration = { ...reel.duration, ...m.durationChoice };
     $("durFree").value = reel.duration.free;

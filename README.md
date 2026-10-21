@@ -186,6 +186,8 @@ Próximas etapas: una cola de publicación con una regla configurable (por ejemp
 
 
 
+**Original al final.** En los templates que terminan mostrando la foto o el video original (Revelado, Video en formas, ¿En qué nivel?, Contador y Mosaico), en la sección Duración se elige cuántos segundos antes del final empieza a aparecer el original, o "Automático" para el momento que trae el template. Lo anterior (armado de formas, niveles, contador) se acomoda para terminar antes. Se guarda con el reel (`ending` en su registro).
+
 ## Generar reels automáticamente
 
 `/generar.html` (enlace "generar" arriba de los editores). Cada foto o video que dejes en la **carpeta de entrada** se convierte en varios reels, **uno por template elegido** (los que correspondan: algunos son solo para fotos o solo para videos), con la configuración base de cada uno. Los reels van a la **carpeta de generados**, cada uno con su JSON (título y descripción sacados de sus frases, más el registro de cómo se hizo), aparte de la carpeta de publicación. Cuando están todas las versiones, la fuente pasa a `procesados/` dentro de la entrada.

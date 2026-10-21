@@ -30,7 +30,7 @@ const Templates = (() => {
       name: "Revelado", kinds: ["image"], aspect: 9 / 16,
       desc: "Las formas arman la imagen y después aparece la foto real.",
       base: { duration: 15, shapes: 150, mode: 1, build: BUILD, phrases: [title(0.01, 0.68, { extend: true }), closing(0.74, 1)] },
-      make: makeReveal,
+      make: makeReveal, ending: true, // ends showing the original (how long: src.ending)
     },
     loop: {
       name: "Loop hipnótico", kinds: ["image", "video"], aspect: 9 / 16,
@@ -43,7 +43,7 @@ const Templates = (() => {
       name: "Video en formas", kinds: ["video"], aspect: 9 / 16,
       desc: "El video convertido en formas, con un fundido al original al final.",
       base: { duration: 15, shapes: 150, mode: 1, build: BUILD, phrases: [title(0.01, 0.68, { extend: true }), closing(0.74, 1)] },
-      make: makeShapesVideo,
+      make: makeShapesVideo, ending: true, // ends showing the original (how long: src.ending)
     },
     levels: {
       name: "¿En qué nivel?", kinds: ["image", "video"], aspect: 9 / 16,
@@ -56,7 +56,7 @@ const Templates = (() => {
           closing(0.84, 1, "Comentá en qué nivel la adivinaste 👇"),
         ],
       },
-      make: makeLevels,
+      make: makeLevels, ending: true, // ends showing the original (how long: src.ending)
     },
     compare: {
       name: "Comparativa", kinds: ["image", "video"], aspect: 9 / 8, stack: 2,
@@ -87,7 +87,7 @@ const Templates = (() => {
         duration: 12, shapes: 300, mode: 1, build: { ...BUILD, curve: "inOutCubic" },
         phrases: [phrase("counter", "{n} {tipo}", 0, 1, "top", "counter"), closing(0.88, 1)],
       },
-      make: makeCounter,
+      make: makeCounter, ending: true, // ends showing the original (how long: src.ending)
     },
     mosaic: {
       name: "Mosaico de niveles", kinds: ["image", "video"], aspect: 9 / 16,
@@ -99,7 +99,7 @@ const Templates = (() => {
           closing(0.86, 1, "¿Con cuál la reconociste? 👇"),
         ],
       },
-      make: makeMosaic,
+      make: makeMosaic, ending: true, // ends showing the original (how long: src.ending)
     },
     prefer: {
       name: "¿Cuál preferís?", kinds: ["image"], aspect: 9 / 16,
@@ -209,9 +209,19 @@ const Templates = (() => {
     return { id, ...LIST[id].make(src, b, src.interp || "smooth") };
   }
 
+  // When the original starts appearing at the end and how long its fade
+  // takes: the template's own moment, or src.ending seconds before the end
+  // when it's set (null: the template's).
+  function finale(src, D, from, fade) {
+    if (src.ending == null) return [from, fade];
+    const e = clamp(src.ending, 0.3, 0.85 * D);
+    return [D - e, Math.min(fade, e)];
+  }
+
   function makeReveal(src, b) {
     const D = src.duration;
-    const B = 0.5 * D, F = 0.62 * D, X = clamp(0.1 * D, 0.6, 2.5);
+    const [F, X] = finale(src, D, 0.62 * D, clamp(0.1 * D, 0.6, 2.5));
+    const B = Math.min(0.5 * D, 0.8 * F); // built before the original comes
     const plan = Build.plan(src.image, {
       direction: "build", order: b.order, curve: b.curve, effect: b.effect,
       effectTime: Math.min(b.effectTime, B * 0.4), duration: B, holdStart: 0.2, holdEnd: D,
@@ -227,12 +237,13 @@ const Templates = (() => {
 
   function makeShapesVideo(src, b, interp) {
     const D = src.anim.duration;
-    const X = clamp(0.2 * D, 0.5, 2);
+    const fade = clamp(0.2 * D, 0.5, 2);
+    const [F, X] = finale(src, D, D - fade, fade);
     return {
-      duration: D, videoTime: (t) => t, originalFrom: D - X,
+      duration: D, videoTime: (t) => t, originalFrom: F,
       paint(ctx, t, w, h) {
         Motion.render(ctx, src.anim, t, interp, w, h);
-        overlay(ctx, smooth((t - (D - X)) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
+        overlay(ctx, smooth((t - F) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
       },
     };
   }
@@ -276,7 +287,8 @@ const Templates = (() => {
   // Videos play the portion with each level's shapes in turn.
   function makeLevels(src, b, interp) {
     const D = lengthOf(src), counts = levelCounts(shapeCount(src)), L = counts.length;
-    const R = 0.8 * D, per = R / L, X = clamp(0.08 * D, 0.5, 1.5);
+    const [R, X] = finale(src, D, 0.8 * D, clamp(0.08 * D, 0.5, 1.5));
+    const per = R / L;
     const level = (t) => clamp(Math.floor(t / per), 0, L - 1);
     return {
       duration: D, videoTime: src.kind === "video" ? (t) => t : () => null, originalFrom: R,
@@ -364,7 +376,9 @@ const Templates = (() => {
 
   // The shapes add up with a counter ({n}); at the end, the photo.
   function makeCounter(src, b) {
-    const D = src.duration, B = 0.7 * D, F = 0.86 * D, X = clamp(0.08 * D, 0.5, 1.2);
+    const D = src.duration;
+    const [F, X] = finale(src, D, 0.86 * D, clamp(0.08 * D, 0.5, 1.2));
+    const B = Math.min(0.7 * D, 0.8 * F); // counted up before the original comes
     const opts = {
       direction: "build", order: b.order, curve: b.curve, effect: b.effect,
       effectTime: Math.min(b.effectTime, B * 0.3), duration: B, holdStart: 0.3, holdEnd: D,
@@ -434,7 +448,8 @@ const Templates = (() => {
   // end the whole frame fades to the original.
   function makeMosaic(src, b, interp) {
     const D = lengthOf(src), counts = mosaicCounts(shapeCount(src)), scratch = new Map();
-    const stagger = 0.12 * D, R = 0.82 * D, X = clamp(0.08 * D, 0.5, 1.5);
+    const [R, X] = finale(src, D, 0.82 * D, clamp(0.08 * D, 0.5, 1.5));
+    const stagger = Math.min(0.12 * D, Math.max(0.05, (R - 0.8) / 3.5)); // all four cells in before the original
     const shown = (i, t) => smooth((t - 0.2 - i * stagger) / 0.6);
     return {
       duration: D, videoTime: src.kind === "video" ? (t) => t : () => null, originalFrom: R,
