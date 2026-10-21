@@ -389,3 +389,17 @@ func TestPostChoice(t *testing.T) {
 		t.Errorf("settings changed: %+v", s)
 	}
 }
+
+func TestTikTokHintOn403(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		fmt.Fprint(w, `{"error":{"code":"unaudited_client_can_only_post_to_private_accounts","message":"Please review our integration guidelines"}}`)
+	}))
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.ep = platformEndpoints{TikTokAPI: fake.URL}
+	err := acc.tiktokCall(context.Background(), "/v2/post/publish/video/init/", "x", map[string]any{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "Cuenta privada") {
+		t.Errorf("error %v", err)
+	}
+}

@@ -553,6 +553,12 @@ func (a *accounts) tiktokCall(ctx context.Context, path, access string, body, ou
 	var ans tiktokAnswer
 	err := a.call(ctx, "POST", a.ep.TikTokAPI+path, access, body, &ans)
 	if err != nil {
+		// Refusals also come as HTTP errors (e.g. 403): explain them too.
+		for code, hint := range tiktokHints {
+			if strings.Contains(err.Error(), code) {
+				return fmt.Errorf("%s (%s)", hint, code)
+			}
+		}
 		return err
 	}
 	if ans.Error.Code != "" && ans.Error.Code != "ok" {
