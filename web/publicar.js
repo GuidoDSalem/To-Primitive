@@ -120,6 +120,13 @@ function moveTo(name, delta) {
   act(api("/api/publish/order", { method: "PUT", json: { names } }));
 }
 
+// All the way to the top (first to be published) or the bottom.
+function moveToEnd(name, top) {
+  const names = view.queue.map((it) => it.name).filter((n) => n !== name);
+  top ? names.unshift(name) : names.push(name);
+  act(api("/api/publish/order", { method: "PUT", json: { names } }));
+}
+
 function button(text, title, onClick) {
   const b = Object.assign(document.createElement("button"), { type: "button", textContent: text, title });
   b.addEventListener("click", onClick);
@@ -203,8 +210,10 @@ function itemCard(it, i, published) {
     const row = document.createElement("div");
     row.className = "row";
     row.append(
-      button("↑", "Antes", () => moveTo(it.name, -1)),
-      button("↓", "Después", () => moveTo(it.name, +1)),
+      Object.assign(button("⤒", "Primero de la cola", () => moveToEnd(it.name, true)), { disabled: i === 0 }),
+      Object.assign(button("↑", "Un lugar antes", () => moveTo(it.name, -1)), { disabled: i === 0 }),
+      Object.assign(button("↓", "Un lugar después", () => moveTo(it.name, +1)), { disabled: i === view.queue.length - 1 }),
+      Object.assign(button("⤓", "Último de la cola", () => moveToEnd(it.name, false)), { disabled: i === view.queue.length - 1 }),
     );
     actions.append(
       row,
