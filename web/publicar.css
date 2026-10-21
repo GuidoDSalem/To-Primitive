@@ -143,3 +143,6 @@ code { font-size: 11px; color: var(--accent); }
 .wcard .foot .n { color: var(--muted); font-size: 12px; }
 .wcard .foot button, .wcard .foot a.button { font-size: 13px; padding: 5px 10px; margin: 0; }
 .wcard .foot button:disabled { opacity: .45; cursor: not-allowed; }
+.discarded-box { margin-top: 28px; }
+.discarded-box summary { cursor: pointer; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+.item.gone video, .item.gone .body, .item.gone .pos { opacity: .55; }

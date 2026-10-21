@@ -133,6 +133,27 @@ function downloadLink(it, published) {
   });
 }
 
+// A discarded video: to see it, download it or put it back in the queue.
+function discardedCard(it) {
+  const card = document.createElement("div");
+  card.className = "item gone";
+  const url = `/api/publish/discarded/${enc(it.name)}/video?v=${it.version}`;
+  const video = Object.assign(document.createElement("video"), { src: url + "#t=1", preload: "metadata", muted: true, playsInline: true, title: "Ver" });
+  video.addEventListener("click", () => window.open(url, "_blank"));
+  const body = document.createElement("div");
+  body.className = "body";
+  body.append(Object.assign(document.createElement("div"), { className: "title", textContent: it.title }),
+    Object.assign(document.createElement("div"), { className: "file", textContent: `${it.name} · ${fmtDur(it.duration)} · ${fmtSize(it.size)}` }));
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.append(
+    button("Restaurar", "Vuelve a la cola", () => act(api(`/api/publish/discarded/${enc(it.name)}/restore`, { method: "POST" }))),
+    Object.assign(document.createElement("a"), { className: "button", textContent: "Descargar", download: it.name, href: url.replace("?", "?download=1&") }),
+  );
+  card.append(Object.assign(document.createElement("div"), { className: "pos", textContent: "✕" }), video, body, actions);
+  return card;
+}
+
 function itemCard(it, i, published) {
   const card = document.createElement("div");
   card.className = "item" + (it.skipped ? " skipped" : "");
@@ -187,6 +208,9 @@ function itemCard(it, i, published) {
       downloadLink(it, false),
       button("Publicar ahora", "Sin esperar la regla", () => {
         if (confirm(`¿Publicar "${it.title}" ahora?`)) act(api(`/api/publish/queue/${enc(it.name)}/now`, { method: "POST" }));
+      }),
+      button("Descartar", "Sale de la cola y pasa a descartados/ (no se borra; se puede restaurar)", () => {
+        if (confirm(`¿Sacar "${it.title}" de la cola? Pasa a descartados/ y lo podés restaurar.`)) act(api(`/api/publish/queue/${enc(it.name)}/discard`, { method: "POST" }));
       }),
     );
   }
@@ -295,6 +319,9 @@ function show(o, ruleToo = false) {
   const active = o.queue.filter((it) => !it.skipped).length;
   $("queueCount").textContent = `${active}` + (o.queue.length > active ? ` (+${o.queue.length - active} salteados)` : "");
   $("pubCount").textContent = o.published.length;
+  $("discardedBox").hidden = !o.discarded.length;
+  $("discCount").textContent = o.discarded.length;
+  $("discarded").replaceChildren(...o.discarded.map(discardedCard));
   // Don't redraw the queue while a title or description in it is being edited.
   const typing = $("queue").contains(document.activeElement) && document.activeElement.matches("input, textarea");
   if (!typing) {

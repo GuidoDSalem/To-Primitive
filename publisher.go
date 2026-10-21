@@ -386,6 +386,7 @@ type Overview struct {
 	NextSlot  *time.Time      `json:"nextSlot,omitempty"`
 	Queue     []PubItem       `json:"queue"`
 	Published []PubItem       `json:"published"`
+	Discarded []PubItem       `json:"discarded"` // last discarded first
 	Log       []pubLogEntry   `json:"log"`
 	Uploader  string          `json:"uploader"`
 }
@@ -415,6 +416,7 @@ func (p *publisher) Overview() Overview {
 	if o.Published == nil {
 		o.Published = []PubItem{}
 	}
+	o.Discarded = p.discardedLocked()
 	o.Log = make([]pubLogEntry, 0, len(p.state.Log))
 	for i := len(p.state.Log) - 1; i >= 0; i-- {
 		o.Log = append(o.Log, p.state.Log[i])
@@ -762,11 +764,16 @@ func (srv *server) pubRequeue(w http.ResponseWriter, r *http.Request, p *publish
 	writeJSON(w, p.Overview())
 }
 
-func (srv *server) pubVideo(published bool) func(http.ResponseWriter, *http.Request, *publisher) {
+// pubVideo serves a video of the queue, or (where) of publicados/ or
+// descartados/.
+func (srv *server) pubVideo(where string) func(http.ResponseWriter, *http.Request, *publisher) {
 	return func(w http.ResponseWriter, r *http.Request, p *publisher) {
 		find := p.queuedPath
-		if published {
+		switch where {
+		case publishedDir:
 			find = p.publishedPath
+		case discardedDir:
+			find = p.discardedPath
 		}
 		path, err := find(r.PathValue("name"))
 		if err != nil {
