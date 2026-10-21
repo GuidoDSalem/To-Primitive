@@ -48,6 +48,32 @@ type PublishSettings struct {
 	Platforms      []string `json:"platforms"`
 	YouTubePrivacy string   `json:"youtubePrivacy"` // public | unlisted | private ("" = public)
 	TikTokPrivacy  string   `json:"tiktokPrivacy"`  // PUBLIC_TO_EVERYONE | MUTUAL_FOLLOW_FRIENDS | FOLLOWER_OF_CREATOR | SELF_ONLY
+
+	// What the person chose in the confirmation window for this one post
+	// (never saved; nil for the schedule).
+	Choice *PostChoice `json:"-"`
+}
+
+// PostChoice is what is confirmed before publishing one video by hand.
+type PostChoice struct {
+	Platforms []string `json:"platforms"`
+	YouTube   *struct {
+		Privacy string `json:"privacy"`
+		Title   string `json:"title"`
+	} `json:"youtube,omitempty"`
+	TikTok *TikTokChoice `json:"tiktok,omitempty"`
+}
+
+// TikTokChoice is a TikTok Direct Post as the person set it up: nothing
+// here has a default chosen for them (as TikTok asks).
+type TikTokChoice struct {
+	Privacy      string `json:"privacy"`
+	Caption      string `json:"caption"`
+	AllowComment bool   `json:"allowComment"`
+	AllowDuet    bool   `json:"allowDuet"`
+	AllowStitch  bool   `json:"allowStitch"`
+	BrandOrganic bool   `json:"brandOrganic"` // promotes the creator's own brand
+	BrandContent bool   `json:"brandContent"` // paid partnership (can't be private)
 }
 
 func defaultSettings() PublishSettings {
@@ -546,6 +572,11 @@ func (p *publisher) SetMeta(name, title, description string, tags []string) erro
 // Publish publishes one video now (by name), or the next in the queue if
 // name is "". It returns the published name ("" if the queue was empty).
 func (p *publisher) Publish(ctx context.Context, name, why string) (string, error) {
+	return p.PublishWith(ctx, name, why, nil)
+}
+
+// PublishWith publishes as Publish, with what was confirmed for this post.
+func (p *publisher) PublishWith(ctx context.Context, name, why string, choice *PostChoice) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var it *PubItem
@@ -572,6 +603,14 @@ func (p *publisher) Publish(ctx context.Context, name, why string) (string, erro
 	}
 	p.busy[it.Name] = true
 	settings := p.state.Settings
+	if choice != nil {
+		for _, pl := range choice.Platforms {
+			if !slices.Contains(platformIDs, pl) {
+				return "", fmt.Errorf("plataforma desconocida %q", pl)
+			}
+		}
+		settings.Platforms, settings.Choice = choice.Platforms, choice
+	}
 	p.logLocked(it.Name, "publicando", why)
 	p.mu.Unlock()
 	result, err := func() (result string, err error) {
@@ -799,7 +838,15 @@ func (srv *server) pubMeta(w http.ResponseWriter, r *http.Request, p *publisher)
 }
 
 func (srv *server) pubNow(w http.ResponseWriter, r *http.Request, p *publisher) {
-	if _, err := p.Publish(r.Context(), r.PathValue("name"), "a mano"); err != nil {
+	var choice *PostChoice
+	if r.ContentLength != 0 {
+		choice = &PostChoice{}
+		if err := json.NewDecoder(r.Body).Decode(choice); err != nil {
+			http.Error(w, "bad choice: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if _, err := p.PublishWith(r.Context(), r.PathValue("name"), "a mano", choice); err != nil {
 		pubError(w, err)
 		return
 	}

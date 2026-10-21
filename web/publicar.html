@@ -114,6 +114,24 @@
     </div>
   </div>
 
+  <dialog id="postDialog" class="post-dialog">
+    <form method="dialog" id="postForm">
+      <div class="post-grid">
+        <video id="postVideo" controls playsinline></video>
+        <div class="post-side">
+          <h2 id="postTitle">Publicar</h2>
+          <div id="postPlatforms" class="post-plats"></div>
+          <div id="postBody"></div>
+          <p id="postStatus" class="hint"></p>
+          <div class="post-actions">
+            <button type="button" id="postCancel">Cancelar</button>
+            <button type="submit" id="postGo" class="primary">Publicar</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <script src="publicar.js"></script>
 </body>
 </html>

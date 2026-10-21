@@ -244,6 +244,8 @@ El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el 
 
 **Plataformas.** En la sección **Plataformas** de la página se conectan las cuentas y se marca dónde publicar: YouTube, TikTok o los dos. "Publicar ahora" y la regla suben el video de verdad a las marcadas; sin ninguna marcada, la publicación es simulada (marca el video y lo mueve a `publicados/` sin subirlo). Si una plataforma falla y la otra no, el video queda en la cola con el error en el registro y lo que ya se subió anotado en su JSON (`uploads`): al reintentar no se publica dos veces. Ya publicado, el video muestra los enlaces (`youtube.com/shorts/…`, `tiktok.com/@…/video/…`).
 
+**Confirmar antes de publicar.** "Publicar ahora" abre una ventana con el video y, por plataforma: en YouTube, título y visibilidad; en TikTok, la cuenta (nombre y foto, leídos de TikTok en ese momento), el texto, quién puede verlo (sin nada elegido de antemano, entre las opciones que TikTok da para esa cuenta), permitir comentarios / Dúo / Stitch (sin marcar; los que la cuenta tiene desactivados no se pueden marcar), y la divulgación de contenido comercial ("Tu marca" / "Contenido de marca"; el contenido de marca no puede ser "Solo yo"), con el aviso de las políticas de TikTok. Lo elegido vale solo para esa publicación; la regla automática usa la configuración de Plataformas.
+
 ### Publicar en YouTube y TikTok
 
 Hace falta crear, una vez, una "app" en cada plataforma (son gratis) y poner sus credenciales en el `.env`; después cada cuenta se conecta desde la página con su login.
@@ -410,6 +412,8 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `PUT /api/publish/order` | Orden preferido de la cola (`names`) |
 | `PUT /api/publish/queue/{name}/meta` | Título, descripción y etiquetas (en el JSON del video) |
 | `GET /api/publish/queue/{name}/video` · `GET /api/publish/published/{name}/video` | El video; con `?download=1`, como descarga con su nombre |
+| `GET /api/publish/queue/{name}/post` | Lo que muestra la ventana de confirmación: textos y la cuenta de TikTok (privacidades, interacciones, duración máxima) |
+| `POST /api/publish/queue/{name}/now` (con JSON) | Publicar con lo confirmado: `platforms`, `youtube` {`privacy`, `title`}, `tiktok` {`privacy`, `caption`, `allowComment`, `allowDuet`, `allowStitch`, `brandOrganic`, `brandContent`} |
 | `GET /api/publish/accounts` | Cuentas: si están configuradas y conectadas, y la dirección de retorno a registrar |
 | `GET /api/publish/accounts/{plataforma}/connect` · `POST …/disconnect` | Conectar (OAuth) o desconectar YouTube / TikTok; vuelven por `/api/publish/oauth/{plataforma}/callback` |
 | `POST /api/publish/queue/{name}/discard` · `POST /api/publish/discarded/{name}/restore` | Descartar un video (a `descartados/`) o devolverlo a la cola; `GET /api/publish/discarded/{name}/video` para verlo |

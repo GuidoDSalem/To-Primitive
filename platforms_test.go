@@ -323,3 +323,69 @@ func TestTikTokWebRedirect(t *testing.T) {
 		t.Errorf("redirect shown %v", list[1]["redirect"])
 	}
 }
+
+// Publishing by hand goes with what was confirmed in the window.
+func TestPostChoice(t *testing.T) {
+	dir, p, _ := pubFixture(t)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(string) string { return "x" }
+	acc.ep = platformEndpoints{YouTubeAPI: fake.URL, TikTokAPI: fake.URL}
+	for _, id := range platformIDs {
+		acc.tokens[id] = &oauthToken{Access: id + "-access-0", Refresh: "r", Expiry: time.Now().Add(time.Hour)}
+	}
+	p.up = &platformUploader{acc: acc, poll: time.Millisecond, wait: 5 * time.Second}
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	srv.pub, srv.acc = p, acc
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+
+	// What the window gets.
+	res, _ := http.Get(ts.URL + "/api/publish/queue/" + url.PathEscape("b viejo.mp4") + "/post")
+	var prev struct {
+		TikTok struct {
+			Caption string
+			Creator creatorInfo
+		}
+	}
+	json.NewDecoder(res.Body).Decode(&prev)
+	if prev.TikTok.Creator.Username != "shapeitup" || prev.TikTok.Caption == "" {
+		t.Fatalf("preview %+v", prev)
+	}
+
+	now := func(body string) (int, string) {
+		res, err := http.Post(ts.URL+"/api/publish/queue/"+url.PathEscape("b viejo.mp4")+"/now", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	// A privacy the account doesn't offer: nothing is published.
+	if code, msg := now(`{"platforms":["tiktok"],"tiktok":{"privacy":"PUBLIC_TO_EVERYONE","caption":"x"}}`); code == 200 || !strings.Contains(msg, "no está disponible") {
+		t.Errorf("unavailable privacy: %d %s", code, msg)
+	}
+	if code, msg := now(`{"platforms":["tiktok"],"tiktok":{"privacy":"SELF_ONLY","caption":"x","brandContent":true}}`); code == 200 || !strings.Contains(msg, "privado") {
+		t.Errorf("branded and private: %d %s", code, msg)
+	}
+	code, msg := now(`{"platforms":["youtube","tiktok"],"youtube":{"privacy":"unlisted","title":"Otro título"},
+		"tiktok":{"privacy":"SELF_ONLY","caption":"Mi texto #arte","allowComment":true,"allowDuet":false,"allowStitch":true,"brandOrganic":true}}`)
+	if code != 200 {
+		t.Fatalf("publish: %d %s", code, msg)
+	}
+	post := f.ttInit["post_info"].(map[string]any)
+	if post["title"] != "Mi texto #arte" || post["privacy_level"] != "SELF_ONLY" || post["disable_comment"] != false ||
+		post["disable_duet"] != true || post["disable_stitch"] != false || post["brand_organic_toggle"] != true || post["brand_content_toggle"] != false {
+		t.Errorf("tiktok post_info %v", post)
+	}
+	snip, status := f.ytMeta["snippet"].(map[string]any), f.ytMeta["status"].(map[string]any)
+	if snip["title"] != "Otro título" || status["privacyStatus"] != "unlisted" {
+		t.Errorf("youtube %v %v", snip, status)
+	}
+	// The choice is for that post only: the settings stay as they were.
+	if s := p.Overview().Settings; len(s.Platforms) != 0 || s.YouTubePrivacy != "" {
+		t.Errorf("settings changed: %+v", s)
+	}
+}

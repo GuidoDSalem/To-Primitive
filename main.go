@@ -167,6 +167,7 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/publish/published/{name}/requeue", srv.withPublisher(srv.pubRequeue))
 	mux.HandleFunc("POST /api/publish/queue/{name}/duplicate", srv.withPublisher(srv.pubDuplicate))
 	mux.HandleFunc("GET /api/publish/accounts", srv.withAccounts(srv.accountsOverview))
+	mux.HandleFunc("GET /api/publish/queue/{name}/post", srv.withPublisher(srv.postPreview))
 	mux.HandleFunc("GET /api/publish/accounts/{platform}/connect", srv.withAccounts(srv.accountConnect))
 	mux.HandleFunc("POST /api/publish/accounts/{platform}/disconnect", srv.withAccounts(srv.accountDisconnect))
 	mux.HandleFunc("GET /api/publish/oauth/{platform}/callback", srv.withAccounts(srv.accountCallback))

@@ -155,3 +155,23 @@ code { font-size: 11px; color: var(--accent); }
 .platform .row button, .platform .row a.button { font-size: 12px; padding: 4px 8px; margin: 0; }
 .platform code { word-break: break-all; }
 .item .file a { color: var(--accent); }
+
+/* Confirming a post. */
+.post-dialog { width: min(980px, 96vw); max-height: 94vh; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); }
+.post-dialog::backdrop { background: #000a; }
+.post-grid { display: grid; grid-template-columns: minmax(0, 300px) 1fr; gap: 20px; padding: 18px; max-height: 94vh; overflow: auto; }
+.post-grid video { width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 10px; }
+.post-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.post-side h2 { margin: 0; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--text); }
+.post-plats { display: flex; gap: 16px; flex-wrap: wrap; }
+.post-plats .check, .post-box .check { margin: 0; color: var(--text); }
+.check.off { opacity: .55; }
+.post-box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.post-box h3 { margin: 0; font-size: 15px; }
+.post-box label { font-size: 12px; color: var(--muted); }
+.post-box input[type=text], .post-box textarea, .post-box select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.post-creator { display: flex; gap: 10px; align-items: center; }
+.post-creator img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+.post-inter, .post-disclose { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.post-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 700px) { .post-grid { grid-template-columns: 1fr; } .post-grid video { max-height: 40vh; } }

@@ -216,13 +216,8 @@ function itemCard(it, i, published) {
       button("Textos", "Título, descripción y etiquetas", () => toggleEdit(card, it)),
       ...(it.duplicable ? [button("Duplicar en otro idioma", "Traduce los textos con el modelo local y vuelve a generar el reel", () => toggleDuplicate(card, it))] : []),
       downloadLink(it, false),
-      Object.assign(button(it.publishing ? "Publicando…" : "Publicar ahora", "Sin esperar la regla", (e) => {
-        const where = (view.settings.platforms ?? []).map((p) => PLATFORM_NAMES[p]).join(" y ") || "ningún lado (simulado)";
-        if (!confirm(`¿Publicar "${it.title}" ahora en ${where}?`)) return;
-        e.target.disabled = true;
-        e.target.textContent = "Publicando…";
-        act(api(`/api/publish/queue/${enc(it.name)}/now`, { method: "POST" }));
-      }), { disabled: !!it.publishing }),
+      Object.assign(button(it.publishing ? "Publicando…" : "Publicar ahora", "Revisar cómo sale y publicarlo sin esperar la regla", () => postDialog.open(it)),
+        { disabled: !!it.publishing }),
       button("Descartar", "Sale de la cola y pasa a descartados/ (no se borra; se puede restaurar)", () => {
         if (confirm(`¿Sacar "${it.title}" de la cola? Pasa a descartados/ y lo podés restaurar.`)) act(api(`/api/publish/queue/${enc(it.name)}/discard`, { method: "POST" }));
       }),
@@ -528,3 +523,185 @@ loadAccounts();
     history.replaceState(null, "", "publicar.html");
   }
 }
+
+// ---------- confirming a post: where, how, with which settings ----------
+
+const MUSIC_URL = "https://www.tiktok.com/legal/page/global/music-usage-confirmation/en";
+const BRANDED_URL = "https://www.tiktok.com/legal/page/global/bc-policy/en";
+const TT_PRIVACY = { PUBLIC_TO_EVERYONE: "Todos", FOLLOWER_OF_CREATOR: "Seguidores", MUTUAL_FOLLOW_FRIENDS: "Amigos", SELF_ONLY: "Solo yo" };
+
+const postDialog = (() => {
+  const dlg = $("postDialog");
+  let item = null, info = null;
+  const state = { platforms: new Set(), yt: {}, tt: {} };
+  const el = (tag, props = {}, ...kids) => {
+    const e = Object.assign(document.createElement(tag), props);
+    e.append(...kids);
+    return e;
+  };
+  const check = (label, checked, onInput, disabled = false, note = "") => {
+    const box = el("input", { type: "checkbox", checked, disabled });
+    box.addEventListener("input", () => onInput(box.checked));
+    return el("label", { className: "check" + (disabled ? " off" : "") }, box, " " + label, note ? el("span", { className: "kinds", textContent: " " + note }) : "");
+  };
+
+  async function open(it) {
+    item = it;
+    info = null;
+    $("postTitle").textContent = it.title;
+    $("postVideo").src = `/api/publish/queue/${enc(it.name)}/video?v=${it.version}`;
+    $("postBody").replaceChildren(el("p", { className: "hint", textContent: "Leyendo las cuentas…" }));
+    $("postPlatforms").replaceChildren();
+    $("postStatus").textContent = "";
+    $("postGo").disabled = true;
+    dlg.showModal();
+    try {
+      info = await api(`/api/publish/queue/${enc(it.name)}/post`);
+    } catch (e) {
+      $("postBody").replaceChildren(el("p", { className: "warn-line", textContent: "No se pudo preparar: " + e.message }));
+      return;
+    }
+    const connected = (info.accounts ?? []).filter((a) => a.connected).map((a) => a.id);
+    state.platforms = new Set((info.platforms ?? []).filter((p) => connected.includes(p)));
+    state.yt = { privacy: info.youtube.privacy || "public", title: info.youtube.title };
+    // TikTok: nothing chosen for the person (privacy and interactions start empty).
+    state.tt = { privacy: "", caption: info.tiktok?.caption ?? "", allowComment: false, allowDuet: false, allowStitch: false, disclose: false, brandOrganic: false, brandContent: false };
+    $("postPlatforms").replaceChildren(...(info.accounts ?? []).map((a) =>
+      check(`Publicar en ${a.name}`, state.platforms.has(a.id), (on) => {
+        on ? state.platforms.add(a.id) : state.platforms.delete(a.id);
+        render();
+      }, !a.connected, a.connected ? "" : "(sin conectar)")));
+    render();
+  }
+
+  function youtubeBox() {
+    const acc = info.accounts.find((a) => a.id === "youtube");
+    const title = el("input", { type: "text", value: state.yt.title, maxLength: 100 });
+    title.addEventListener("input", () => { state.yt.title = title.value; validate(); });
+    const privacy = el("select");
+    privacy.append(...PRIVACY.youtube.map(([v, t]) => new Option(t, v, false, v === state.yt.privacy)));
+    privacy.addEventListener("input", () => { state.yt.privacy = privacy.value; });
+    return el("section", { className: "post-box" },
+      el("h3", { textContent: "YouTube" }, el("span", { className: "kinds", textContent: acc?.account ? " · " + acc.account : "" })),
+      el("label", { textContent: "Título" }), title,
+      el("label", { textContent: "Visibilidad" }), privacy);
+  }
+
+  function tiktokBox() {
+    const tt = info.tiktok;
+    const box = el("section", { className: "post-box" });
+    if (!tt || tt.error || !tt.creator) {
+      box.append(el("h3", { textContent: "TikTok" }), el("p", { className: "warn-line", textContent: "No se pudo leer la cuenta de TikTok" + (tt?.error ? ": " + tt.error : "") + ". Probá más tarde." }));
+      return box;
+    }
+    const c = tt.creator;
+    const who = el("div", { className: "post-creator" });
+    if (c.creator_avatar_url) who.append(el("img", { src: c.creator_avatar_url, alt: "" }));
+    who.append(el("div", {}, el("strong", { textContent: c.creator_nickname || c.creator_username }), el("div", { className: "kinds", textContent: "@" + c.creator_username })));
+    box.append(el("h3", { textContent: "TikTok" }), who);
+    if (c.max_video_post_duration_sec && item.duration > c.max_video_post_duration_sec) {
+      box.append(el("p", { className: "warn-line", textContent: `Este video dura ${fmtDur(item.duration)} y la cuenta permite hasta ${fmtDur(c.max_video_post_duration_sec)}.` }));
+    }
+    const caption = el("textarea", { rows: 4, value: state.tt.caption, maxLength: 2200 });
+    const count = el("span", { className: "kinds" });
+    const upd = () => { count.textContent = ` ${[...caption.value].length} / 2200`; };
+    caption.addEventListener("input", () => { state.tt.caption = caption.value; upd(); validate(); });
+    upd();
+    const privacy = el("select", { required: true });
+    privacy.append(new Option("Elegí quién puede verlo…", "", true, state.tt.privacy === ""));
+    for (const v of c.privacy_level_options ?? []) {
+      const o = new Option(TT_PRIVACY[v] ?? v, v, false, v === state.tt.privacy);
+      if (v === "SELF_ONLY" && state.tt.brandContent) {
+        o.disabled = true;
+        o.textContent += " (no disponible con contenido de marca)";
+      }
+      privacy.append(o);
+    }
+    privacy.addEventListener("input", () => { state.tt.privacy = privacy.value; render(); });
+    const inter = el("div", { className: "post-inter" },
+      check("Permitir comentarios", state.tt.allowComment, (v) => { state.tt.allowComment = v; }, c.comment_disabled, c.comment_disabled ? "(desactivado en la cuenta)" : ""),
+      check("Permitir Dúo", state.tt.allowDuet, (v) => { state.tt.allowDuet = v; }, c.duet_disabled, c.duet_disabled ? "(desactivado en la cuenta)" : ""),
+      check("Permitir Stitch", state.tt.allowStitch, (v) => { state.tt.allowStitch = v; }, c.stitch_disabled, c.stitch_disabled ? "(desactivado en la cuenta)" : ""));
+    const disclose = el("div", { className: "post-disclose" },
+      check("Divulgar contenido comercial", state.tt.disclose, (v) => {
+        state.tt.disclose = v;
+        if (!v) state.tt.brandOrganic = state.tt.brandContent = false;
+        render();
+      }));
+    if (state.tt.disclose) {
+      disclose.append(
+        check("Tu marca", state.tt.brandOrganic, (v) => { state.tt.brandOrganic = v; render(); }, false, "— se etiqueta como \"Contenido promocional\""),
+        check("Contenido de marca", state.tt.brandContent, (v) => {
+          state.tt.brandContent = v;
+          if (v && state.tt.privacy === "SELF_ONLY") state.tt.privacy = "";
+          render();
+        }, false, "— se etiqueta como \"Colaboración pagada\""));
+      if (!state.tt.brandOrganic && !state.tt.brandContent) disclose.append(el("p", { className: "warn-line", textContent: "Elegí si es tu marca, contenido de marca o ambos." }));
+    }
+    const policies = el("p", { className: "hint" }, "Al publicar, aceptás la ", el("a", { href: MUSIC_URL, target: "_blank", rel: "noopener", textContent: "Music Usage Confirmation" }), " de TikTok");
+    if (state.tt.brandContent) policies.append(" y su ", el("a", { href: BRANDED_URL, target: "_blank", rel: "noopener", textContent: "Branded Content Policy" }));
+    policies.append(". El video puede tardar unos minutos en aparecer en tu perfil.");
+    box.append(el("label", { textContent: "Texto (descripción)" }), caption, count,
+      el("label", { textContent: "Quién puede verlo" }), privacy, inter, disclose, policies);
+    return box;
+  }
+
+  function render() {
+    const parts = [];
+    if (state.platforms.has("youtube")) parts.push(youtubeBox());
+    if (state.platforms.has("tiktok")) parts.push(tiktokBox());
+    if (!parts.length) parts.push(el("p", { className: "hint", textContent: "Sin plataformas marcadas: la publicación es simulada (se mueve a publicados/ sin subirse)." }));
+    $("postBody").replaceChildren(...parts);
+    validate();
+  }
+
+  function problem() {
+    if (state.platforms.has("youtube") && !state.yt.title.trim()) return "Falta el título para YouTube.";
+    if (state.platforms.has("tiktok")) {
+      const tt = info.tiktok, c = tt?.creator;
+      if (!c) return "No se pudo leer la cuenta de TikTok.";
+      if (c.max_video_post_duration_sec && item.duration > c.max_video_post_duration_sec) return "El video es más largo de lo que permite la cuenta de TikTok.";
+      if (!state.tt.privacy) return "Elegí quién puede verlo en TikTok.";
+      if (state.tt.disclose && !state.tt.brandOrganic && !state.tt.brandContent) return "Completá el contenido comercial.";
+    }
+    return "";
+  }
+
+  function validate() {
+    const p = problem();
+    $("postGo").disabled = !!p;
+    $("postStatus").textContent = p;
+  }
+
+  async function go() {
+    const choice = { platforms: [...state.platforms] };
+    if (state.platforms.has("youtube")) choice.youtube = { privacy: state.yt.privacy, title: state.yt.title };
+    if (state.platforms.has("tiktok")) {
+      const t = state.tt;
+      choice.tiktok = { privacy: t.privacy, caption: t.caption, allowComment: t.allowComment, allowDuet: t.allowDuet, allowStitch: t.allowStitch, brandOrganic: t.brandOrganic, brandContent: t.brandContent };
+    }
+    $("postGo").disabled = true;
+    $("postCancel").disabled = true;
+    $("postStatus").textContent = "Publicando… (subiendo el video, puede tardar un poco)";
+    try {
+      show(await api(`/api/publish/queue/${enc(item.name)}/now`, { method: "POST", json: choice }));
+      close();
+    } catch (e) {
+      $("postStatus").textContent = "No se publicó: " + e.message;
+      $("postCancel").disabled = false;
+      validate();
+      refresh();
+    }
+  }
+
+  function close() {
+    $("postVideo").pause();
+    $("postVideo").removeAttribute("src");
+    $("postCancel").disabled = false;
+    dlg.close();
+  }
+  $("postForm").addEventListener("submit", (e) => { e.preventDefault(); if (!problem()) go(); });
+  $("postCancel").addEventListener("click", close);
+  dlg.addEventListener("cancel", (e) => { if ($("postCancel").disabled) e.preventDefault(); else close(); });
+  return { open };
+})();

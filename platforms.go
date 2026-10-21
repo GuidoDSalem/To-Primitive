@@ -477,7 +477,15 @@ func (u *platformUploader) youtube(ctx context.Context, path string, item PubIte
 		n += len(t) + 1
 	}
 	privacy := s.YouTubePrivacy
-	if privacy == "" {
+	if c := s.Choice; c != nil && c.YouTube != nil {
+		if c.YouTube.Privacy != "" {
+			privacy = c.YouTube.Privacy
+		}
+		if t := strings.TrimSpace(c.YouTube.Title); t != "" {
+			title = strings.NewReplacer("<", "", ">", "").Replace(t)
+		}
+	}
+	if !slices.Contains([]string{"public", "unlisted", "private"}, privacy) {
 		privacy = "public"
 	}
 	meta := map[string]any{
@@ -557,10 +565,14 @@ func (a *accounts) tiktokCall(ctx context.Context, path, access string, body, ou
 }
 
 type creatorInfo struct {
-	Username       string   `json:"creator_username"`
-	Nickname       string   `json:"creator_nickname"`
-	PrivacyOptions []string `json:"privacy_level_options"`
-	MaxDuration    int      `json:"max_video_post_duration_sec"`
+	Username        string   `json:"creator_username"`
+	Nickname        string   `json:"creator_nickname"`
+	AvatarURL       string   `json:"creator_avatar_url"`
+	PrivacyOptions  []string `json:"privacy_level_options"`
+	CommentDisabled bool     `json:"comment_disabled"`
+	DuetDisabled    bool     `json:"duet_disabled"`
+	StitchDisabled  bool     `json:"stitch_disabled"`
+	MaxDuration     int      `json:"max_video_post_duration_sec"`
 }
 
 func (a *accounts) creatorInfo(ctx context.Context, access string) (creatorInfo, error) {
@@ -579,6 +591,19 @@ func tiktokChunks(size int64) (chunk int64, count int) {
 	return piece, int(size / piece)
 }
 
+// tiktokCaption is the default caption: title, description and the tags as
+// hashtags (those not already in it).
+func tiktokCaption(item PubItem) string {
+	caption := strings.TrimSpace(item.Title + "\n\n" + item.Description)
+	for _, t := range item.Tags {
+		h := "#" + strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(t), "#"), " ", "")
+		if h != "#" && !strings.Contains(strings.ToLower(caption), strings.ToLower(h)) {
+			caption += " " + h
+		}
+	}
+	return caption
+}
+
 func (u *platformUploader) tiktok(ctx context.Context, path string, item PubItem, s PublishSettings) (uploadResult, error) {
 	access, err := u.acc.access(ctx, "tiktok")
 	if err != nil {
@@ -591,12 +616,30 @@ func (u *platformUploader) tiktok(ctx context.Context, path string, item PubItem
 	if info.MaxDuration > 0 && item.Duration > float64(info.MaxDuration) {
 		return uploadResult{}, fmt.Errorf("dura %.0f s y la cuenta permite hasta %d s", item.Duration, info.MaxDuration)
 	}
+	post := map[string]any{"disable_comment": false, "disable_duet": false, "disable_stitch": false}
 	privacy := s.TikTokPrivacy
 	if privacy == "" {
 		privacy = "PUBLIC_TO_EVERYONE"
 	}
 	note := ""
-	if !slices.Contains(info.PrivacyOptions, privacy) {
+	if c := s.Choice; c != nil && c.TikTok != nil {
+		// Chosen in the confirmation window: as it is, or not at all.
+		t := c.TikTok
+		if !slices.Contains(info.PrivacyOptions, t.Privacy) {
+			return uploadResult{}, fmt.Errorf("la privacidad %q no está disponible para esta cuenta", t.Privacy)
+		}
+		if t.BrandContent && t.Privacy == "SELF_ONLY" {
+			return uploadResult{}, errors.New("el contenido de marca (colaboración paga) no puede ser privado")
+		}
+		post = map[string]any{
+			"disable_comment":      !t.AllowComment || info.CommentDisabled,
+			"disable_duet":         !t.AllowDuet || info.DuetDisabled,
+			"disable_stitch":       !t.AllowStitch || info.StitchDisabled,
+			"brand_organic_toggle": t.BrandOrganic,
+			"brand_content_toggle": t.BrandContent,
+		}
+		privacy = t.Privacy
+	} else if !slices.Contains(info.PrivacyOptions, privacy) {
 		// e.g. an app TikTok hasn't audited yet: only private.
 		switch {
 		case slices.Contains(info.PrivacyOptions, "SELF_ONLY"):
@@ -605,13 +648,9 @@ func (u *platformUploader) tiktok(ctx context.Context, path string, item PubItem
 			privacy = info.PrivacyOptions[0]
 		}
 	}
-	// The caption: title, description and tags as hashtags (if missing).
-	caption := strings.TrimSpace(item.Title + "\n\n" + item.Description)
-	for _, t := range item.Tags {
-		h := "#" + strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(t), "#"), " ", "")
-		if h != "#" && !strings.Contains(strings.ToLower(caption), strings.ToLower(h)) {
-			caption += " " + h
-		}
+	caption := tiktokCaption(item)
+	if c := s.Choice; c != nil && c.TikTok != nil && strings.TrimSpace(c.TikTok.Caption) != "" {
+		caption = strings.TrimSpace(c.TikTok.Caption)
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -625,9 +664,9 @@ func (u *platformUploader) tiktok(ctx context.Context, path string, item PubItem
 		PublishID string `json:"publish_id"`
 		UploadURL string `json:"upload_url"`
 	}
+	post["title"], post["privacy_level"] = cut(caption, 2200), privacy
 	err = u.acc.tiktokCall(ctx, "/v2/post/publish/video/init/", access, map[string]any{
-		"post_info": map[string]any{"title": cut(caption, 2200), "privacy_level": privacy,
-			"disable_comment": false, "disable_duet": false, "disable_stitch": false},
+		"post_info":   post,
 		"source_info": map[string]any{"source": "FILE_UPLOAD", "video_size": size, "chunk_size": chunk, "total_chunk_count": count},
 	}, &init)
 	if err != nil {
@@ -759,4 +798,38 @@ func (srv *server) accountDisconnect(w http.ResponseWriter, r *http.Request, a *
 
 func htmlEscape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;").Replace(s)
+}
+
+// postPreview is what the confirmation window needs to publish one video:
+// its texts and, for TikTok, the account as it is right now (what it
+// allows), as TikTok asks to show before each post.
+func (srv *server) postPreview(w http.ResponseWriter, r *http.Request, p *publisher) {
+	name := r.PathValue("name")
+	var item *PubItem
+	o := p.Overview()
+	for _, it := range o.Queue {
+		if it.Name == name {
+			item = &it
+			break
+		}
+	}
+	if item == nil {
+		pubError(w, errNotFound)
+		return
+	}
+	out := map[string]any{"title": item.Title, "duration": item.Duration, "platforms": o.Settings.Platforms,
+		"youtube": map[string]any{"privacy": o.Settings.YouTubePrivacy, "title": cut(item.Title, 100)}}
+	if srv.acc != nil {
+		out["accounts"] = srv.acc.Status()
+		if access, err := srv.acc.access(r.Context(), "tiktok"); err == nil {
+			tt := map[string]any{"caption": cut(tiktokCaption(*item), 2200)}
+			if info, err := srv.acc.creatorInfo(r.Context(), access); err != nil {
+				tt["error"] = err.Error()
+			} else {
+				tt["creator"] = info
+			}
+			out["tiktok"] = tt
+		}
+	}
+	writeJSON(w, out)
 }
