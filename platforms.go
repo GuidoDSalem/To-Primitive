@@ -350,8 +350,22 @@ func (a *accounts) call(ctx context.Context, method, endpoint, access string, bo
 	return nil
 }
 
+// youtubeHints says what to do about YouTube's most common refusals (by
+// the "reason" in its error).
+var youtubeHints = map[string]string{
+	"youtubeSignupRequired": "la cuenta de Google conectada no tiene canal de YouTube (o elegiste tu cuenta personal en lugar del canal): desconectá YouTube, conectalo de nuevo y elegí el canal; si no tenés uno, creálo en youtube.com",
+	"uploadLimitExceeded":   "YouTube no deja subir más videos por hoy con esta cuenta: probá mañana",
+	"quotaExceeded":         "se terminó la cuota diaria de la API de YouTube (se renueva a la medianoche del Pacífico)",
+	"forbidden":             "YouTube no dejó subir el video con estos permisos: desconectá y conectá de nuevo la cuenta",
+}
+
 // apiError keeps the useful part of an API's error answer.
 func apiError(status int, body []byte) error {
+	for reason, hint := range youtubeHints {
+		if strings.Contains(string(body), `"reason": "`+reason+`"`) || strings.Contains(string(body), `"reason":"`+reason+`"`) {
+			return fmt.Errorf("%s (%s)", hint, reason)
+		}
+	}
 	var e struct {
 		Error json.RawMessage `json:"error"`
 	}

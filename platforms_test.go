@@ -446,3 +446,10 @@ func TestRepublish(t *testing.T) {
 		t.Fatalf("again: %v, %d uploads", err, f.ytUploads)
 	}
 }
+
+func TestYouTubeHint(t *testing.T) {
+	body := []byte(`{"error":{"code":401,"message":"Unauthorized","errors":[{"message":"Unauthorized","domain":"youtube.header","reason": "youtubeSignupRequired"}]}}`)
+	if err := apiError(401, body); !strings.Contains(err.Error(), "no tiene canal") {
+		t.Errorf("%v", err)
+	}
+}
