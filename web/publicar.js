@@ -125,6 +125,14 @@ function button(text, title, onClick) {
   return b;
 }
 
+// The video file as it is (to upload it by hand, send it, keep it…).
+function downloadLink(it, published) {
+  return Object.assign(document.createElement("a"), {
+    className: "button", textContent: "Descargar", title: "Bajar el MP4", download: it.name,
+    href: `/api/publish/${published ? "published" : "queue"}/${enc(it.name)}/video?download=1&v=${it.version}`,
+  });
+}
+
 function itemCard(it, i, published) {
   const card = document.createElement("div");
   card.className = "item" + (it.skipped ? " skipped" : "");
@@ -159,6 +167,7 @@ function itemCard(it, i, published) {
   actions.className = "actions";
   if (published) {
     actions.append(button("Volver a la cola", "Lo pone primero en la cola", () => act(api(`/api/publish/published/${enc(it.name)}/requeue`, { method: "POST" }))));
+    actions.append(downloadLink(it, true));
   } else {
     const row = document.createElement("div");
     row.className = "row";
@@ -175,6 +184,7 @@ function itemCard(it, i, published) {
       ] : []),
       button("Textos", "Título, descripción y etiquetas", () => toggleEdit(card, it)),
       ...(it.duplicable ? [button("Duplicar en otro idioma", "Traduce los textos con el modelo local y vuelve a generar el reel", () => toggleDuplicate(card, it))] : []),
+      downloadLink(it, false),
       button("Publicar ahora", "Sin esperar la regla", () => {
         if (confirm(`¿Publicar "${it.title}" ahora?`)) act(api(`/api/publish/queue/${enc(it.name)}/now`, { method: "POST" }));
       }),

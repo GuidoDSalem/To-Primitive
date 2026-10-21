@@ -73,6 +73,11 @@ func TestEditQueued(t *testing.T) {
 	first, _ := http.Get(videoURL)
 	io.Copy(io.Discard, first.Body)
 	etag, lastMod := first.Header.Get("ETag"), first.Header.Get("Last-Modified")
+	dl, _ := http.Get(videoURL + "?download=1")
+	io.Copy(io.Discard, dl.Body)
+	if cd := dl.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") || !strings.Contains(cd, url.PathEscape("mona · en.mp4")) {
+		t.Errorf("download: %q", cd)
+	}
 	if etag == "" || first.Header.Get("Cache-Control") != "no-cache" {
 		t.Errorf("headers %v", first.Header)
 	}

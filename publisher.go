@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -771,6 +772,16 @@ func (srv *server) pubVideo(published bool) func(http.ResponseWriter, *http.Requ
 		if err != nil {
 			pubError(w, err)
 			return
+		}
+		if r.URL.Query().Has("download") {
+			name := filepath.Base(path)
+			ascii := strings.Map(func(r rune) rune {
+				if r < 32 || r > 126 || r == '"' || r == '\\' {
+					return '_'
+				}
+				return r
+			}, name)
+			w.Header().Set("Content-Disposition", `attachment; filename="`+ascii+`"; filename*=UTF-8''`+url.PathEscape(name))
 		}
 		serveFresh(w, r, path)
 	}
