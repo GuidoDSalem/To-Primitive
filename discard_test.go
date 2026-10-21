@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +50,14 @@ func TestDiscard(t *testing.T) {
 	o = p.Overview()
 	if names(o.Queue) != "c nuevo.mp4,b viejo.mp4,a medio.mp4" || len(o.Discarded) != 0 || o.Queue[2].Title != "Medio" {
 		t.Errorf("after restore: queue %s, discarded %s", names(o.Queue), names(o.Discarded))
+	}
+}
+
+// A video without a sound track is flagged.
+func TestSilentWarning(t *testing.T) {
+	_, p, _ := pubFixture(t) // silent videos
+	q := p.Overview().Queue
+	if !q[0].Silent || !strings.Contains(strings.Join(q[0].Warnings, " "), "sin audio") {
+		t.Errorf("silent video: %+v", q[0])
 	}
 }

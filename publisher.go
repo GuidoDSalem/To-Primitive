@@ -217,6 +217,7 @@ type PubItem struct {
 	Editable    bool                    `json:"editable,omitempty"`   // has its settings and source: it can reopen in the reel editor
 	Duplicable  bool                    `json:"duplicable,omitempty"` // from the generator: it can be made again in another language
 	Warnings    []string                `json:"warnings,omitempty"`
+	Silent      bool                    `json:"silent,omitempty"`     // the file has no sound track
 	Publishing  bool                    `json:"publishing,omitempty"` // being uploaded now
 	Uploads     map[string]uploadResult `json:"uploads,omitempty"`    // where it already went (by platform)
 }
@@ -350,10 +351,21 @@ func (p *publisher) item(path string, fi os.FileInfo) PubItem {
 		b, _ := json.Marshal(u)
 		json.Unmarshal(b, &it.Uploads)
 	}
+	// Without sound: it was made with a song but the file lost it, or it
+	// never had one (a reel without audio does worse on every platform).
+	it.Silent = info.Duration > 0 && !info.Audio
+	hadSound := false
 	if s, ok := m["settings"].(map[string]any); ok {
-		if a, _ := s["audio"].(map[string]any); a != nil && a["mode"] != nil && a["mode"] != "none" && !info.Audio && info.Duration > 0 {
-			it.Warnings = append(it.Warnings, "no tiene sonido, aunque se armó con sonido: abrilo con Editar reel y guardalo de nuevo")
-		}
+		a, _ := s["audio"].(map[string]any)
+		hadSound = a != nil && a["mode"] != nil && a["mode"] != "none"
+	}
+	switch {
+	case it.Silent && hadSound:
+		it.Warnings = append(it.Warnings, "no tiene sonido, aunque se armó con sonido: abrilo con Editar reel y guardalo de nuevo")
+	case it.Silent:
+		it.Warnings = append(it.Warnings, "sin audio: agregale una canción antes de publicarlo (editor de reels, sección Audio)")
+	}
+	if s, ok := m["settings"].(map[string]any); ok {
 		it.Brand, _ = s["brand"].(string)
 		it.Brand = strings.TrimSpace(it.Brand)
 		src, _ := m["source"].(string)

@@ -178,6 +178,7 @@ function itemCard(it, i, published) {
   body.className = "body";
   const add = (cls, text) => body.append(Object.assign(document.createElement("div"), { className: cls, textContent: text }));
   add("title", it.title);
+  if (it.silent) body.firstChild.append(Object.assign(document.createElement("span"), { className: "silent-badge", textContent: "🔇 Sin audio", title: "El video no tiene sonido" }));
   if (published) {
     add("when", it.publishedAt ? "Publicado el " + fmtWhen(it.publishedAt) : "Publicado");
     if (it.result) add("file", it.result);
@@ -674,6 +675,7 @@ const postDialog = (() => {
 
   function render() {
     const parts = [];
+    if (item.silent) parts.push(el("p", { className: "post-error", textContent: "🔇 Este video no tiene audio. Los reels sin sonido suelen rendir mucho menos: conviene agregarle una canción antes de publicarlo." }));
     for (const p of state.platforms) {
       const d = doneBox(p);
       if (d) parts.push(d);

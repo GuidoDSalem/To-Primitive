@@ -1414,7 +1414,7 @@ function refreshUI() {
   if (!exporting) {
     $("export").disabled = !comp || !!$("export").dataset.closed; // closed: a refined reel already sent to the queue
     if (has && !comp) $("expStatus").textContent = reel.kind === "image" ? "Esperá a que estén todas las formas para exportar." : "Calculá el video para poder exportar.";
-    else if (has && !$("expStatus").dataset.done) $("expStatus").textContent = `Reel de ${comp.duration.toFixed(1)} s · ${Templates.LIST[comp.id].name} · 1080×1920, 30 fps.`;
+    else if (has && !$("expStatus").dataset.done) $("expStatus").textContent = `Reel de ${comp.duration.toFixed(1)} s · ${Templates.LIST[comp.id].name} · 1080×1920, 30 fps.` + (audioSource() ? "" : " ⚠ Sin audio: elegí una canción en la sección Audio.");
   }
   $("viewMode").querySelector('[data-value="reel"]').disabled = !comp;
   // While the shapes are found again the reel can't show: back to it when ready.
@@ -1626,6 +1626,7 @@ async function loadLibrary() {
     info.className = "info";
     const title = document.createElement("strong");
     title.textContent = (Templates.LIST[m.template]?.name ?? "Reel") + " · " + fmtTime(e.duration);
+    if (!m.audio || m.audio.mode === "none") title.append(Object.assign(document.createElement("span"), { className: "silent-badge", textContent: "🔇 Sin audio" }));
     const sub = document.createElement("span");
     sub.textContent = new Date(e.created).toLocaleString() + " · " + (e.size / 1e6).toFixed(1) + " MB" + (m.texts?.title ? " · " + m.texts.title : "");
     info.append(title, sub);
