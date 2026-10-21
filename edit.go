@@ -31,6 +31,9 @@ func (p *publisher) Replace(name, reelPath string, meta json.RawMessage) error {
 	if err != nil {
 		return err
 	}
+	if p.busy[name] {
+		return errors.New("se está publicando ahora: guardalo cuando termine")
+	}
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err

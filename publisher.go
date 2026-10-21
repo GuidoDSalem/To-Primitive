@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,10 @@ type PublishSettings struct {
 	Times   []string `json:"times"`
 	Days    []int    `json:"days"`
 	TZ      string   `json:"tz"`
+	// Where it publishes (youtube, tiktok); none: simulated.
+	Platforms      []string `json:"platforms"`
+	YouTubePrivacy string   `json:"youtubePrivacy"` // public | unlisted | private ("" = public)
+	TikTokPrivacy  string   `json:"tiktokPrivacy"`  // PUBLIC_TO_EVERYONE | MUTUAL_FOLLOW_FRIENDS | FOLLOWER_OF_CREATOR | SELF_ONLY
 }
 
 func defaultSettings() PublishSettings {
@@ -71,6 +76,22 @@ func (s *PublishSettings) validate() error {
 	}
 	if _, err := time.LoadLocation(s.TZ); err != nil {
 		return fmt.Errorf("zona horaria desconocida %q", s.TZ)
+	}
+	var plats []string
+	for _, p := range s.Platforms {
+		if !slices.Contains(platformIDs, p) {
+			return fmt.Errorf("plataforma desconocida %q", p)
+		}
+		if !slices.Contains(plats, p) {
+			plats = append(plats, p)
+		}
+	}
+	s.Platforms = plats
+	if !slices.Contains([]string{"", "public", "unlisted", "private"}, s.YouTubePrivacy) {
+		return fmt.Errorf("privacidad de YouTube inválida %q", s.YouTubePrivacy)
+	}
+	if !slices.Contains([]string{"", "PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"}, s.TikTokPrivacy) {
+		return fmt.Errorf("privacidad de TikTok inválida %q", s.TikTokPrivacy)
 	}
 	return nil
 }
@@ -151,36 +172,39 @@ type pubState struct {
 
 // PubItem is a video in the queue or among the published ones.
 type PubItem struct {
-	Name        string     `json:"name"`
-	Size        int64      `json:"size"`
-	Modified    time.Time  `json:"modified"`
-	Duration    float64    `json:"duration"`
-	Width       int        `json:"width"`
-	Height      int        `json:"height"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Tags        []string   `json:"tags"`
-	Skipped     bool       `json:"skipped,omitempty"`
-	ScheduledAt *time.Time `json:"scheduledAt,omitempty"`
-	PublishedAt *time.Time `json:"publishedAt,omitempty"`
-	Result      string     `json:"result,omitempty"`
-	Brand       string     `json:"brand,omitempty"`      // the reel's brand (its record), e.g. @account
-	Version     string     `json:"version"`              // changes whenever the video or its JSON do (for the browser's cache)
-	Editable    bool       `json:"editable,omitempty"`   // has its settings and source: it can reopen in the reel editor
-	Duplicable  bool       `json:"duplicable,omitempty"` // from the generator: it can be made again in another language
-	Warnings    []string   `json:"warnings,omitempty"`
+	Name        string                  `json:"name"`
+	Size        int64                   `json:"size"`
+	Modified    time.Time               `json:"modified"`
+	Duration    float64                 `json:"duration"`
+	Width       int                     `json:"width"`
+	Height      int                     `json:"height"`
+	Title       string                  `json:"title"`
+	Description string                  `json:"description"`
+	Tags        []string                `json:"tags"`
+	Skipped     bool                    `json:"skipped,omitempty"`
+	ScheduledAt *time.Time              `json:"scheduledAt,omitempty"`
+	PublishedAt *time.Time              `json:"publishedAt,omitempty"`
+	Result      string                  `json:"result,omitempty"`
+	Brand       string                  `json:"brand,omitempty"`      // the reel's brand (its record), e.g. @account
+	Version     string                  `json:"version"`              // changes whenever the video or its JSON do (for the browser's cache)
+	Editable    bool                    `json:"editable,omitempty"`   // has its settings and source: it can reopen in the reel editor
+	Duplicable  bool                    `json:"duplicable,omitempty"` // from the generator: it can be made again in another language
+	Warnings    []string                `json:"warnings,omitempty"`
+	Publishing  bool                    `json:"publishing,omitempty"` // being uploaded now
+	Uploads     map[string]uploadResult `json:"uploads,omitempty"`    // where it already went (by platform)
 }
 
-// uploader publishes one video on a platform and says where it went.
+// uploader publishes one video (on the platforms the settings say) and
+// says where it went.
 type uploader interface {
-	Upload(ctx context.Context, path string, item PubItem) (string, error)
+	Upload(ctx context.Context, path string, item PubItem, s PublishSettings) (string, error)
 }
 
 // simulatedUploader publishes nothing: it lets the queue and the schedule
 // run for real before connecting a platform.
 type simulatedUploader struct{}
 
-func (simulatedUploader) Upload(ctx context.Context, path string, item PubItem) (string, error) {
+func (simulatedUploader) Upload(ctx context.Context, path string, item PubItem, s PublishSettings) (string, error) {
 	return "simulado (no se subió a ninguna plataforma)", nil
 }
 
@@ -192,6 +216,7 @@ type publisher struct {
 	mu    sync.Mutex
 	state pubState
 	probe map[string]mediaInfo // by name|size|mtime
+	busy  map[string]bool      // being published now (the upload runs unlocked)
 
 	editable func(side map[string]any) bool // whether a video's source can be found (set by the server)
 }
@@ -200,7 +225,7 @@ func newPublisher(dir string, up uploader) (*publisher, error) {
 	if err := os.MkdirAll(filepath.Join(dir, publishedDir), 0o755); err != nil {
 		return nil, err
 	}
-	p := &publisher{dir: dir, up: up, now: time.Now, probe: map[string]mediaInfo{}}
+	p := &publisher{dir: dir, up: up, now: time.Now, probe: map[string]mediaInfo{}, busy: map[string]bool{}}
 	p.state.Settings = defaultSettings()
 	if b, err := os.ReadFile(filepath.Join(dir, stateFile)); err == nil {
 		if err := json.Unmarshal(b, &p.state); err != nil {
@@ -294,6 +319,10 @@ func (p *publisher) item(path string, fi os.FileInfo) PubItem {
 		}
 	}
 	it.Result, _ = m["result"].(string)
+	if u, ok := m["uploads"]; ok {
+		b, _ := json.Marshal(u)
+		json.Unmarshal(b, &it.Uploads)
+	}
 	if s, ok := m["settings"].(map[string]any); ok {
 		if a, _ := s["audio"].(map[string]any); a != nil && a["mode"] != nil && a["mode"] != "none" && !info.Audio && info.Duration > 0 {
 			it.Warnings = append(it.Warnings, "no tiene sonido, aunque se armó con sonido: abrilo con Editar reel y guardalo de nuevo")
@@ -340,6 +369,9 @@ func (p *publisher) videosIn(dir string) []PubItem {
 // no time.
 func (p *publisher) queueLocked() []PubItem {
 	items := p.videosIn(p.dir)
+	for i := range items {
+		items[i].Publishing = p.busy[items[i].Name]
+	}
 	rank := map[string]int{}
 	for i, n := range p.state.Order {
 		rank[n] = i
@@ -518,7 +550,7 @@ func (p *publisher) Publish(ctx context.Context, name, why string) (string, erro
 	defer p.mu.Unlock()
 	var it *PubItem
 	for _, q := range p.queueLocked() {
-		if (name == "" && !q.Skipped) || q.Name == name {
+		if (name == "" && !q.Skipped && !p.busy[q.Name]) || q.Name == name {
 			q := q
 			it = &q
 			break
@@ -533,7 +565,25 @@ func (p *publisher) Publish(ctx context.Context, name, why string) (string, erro
 		return "", nil
 	}
 	path := filepath.Join(p.dir, it.Name)
-	result, err := p.up.Upload(ctx, path, *it)
+	// Uploading takes a while: the queue stays usable meanwhile, and this
+	// video can't be moved or edited until it's done.
+	if p.busy[it.Name] {
+		return "", errors.New("ya se está publicando")
+	}
+	p.busy[it.Name] = true
+	settings := p.state.Settings
+	p.logLocked(it.Name, "publicando", why)
+	p.mu.Unlock()
+	result, err := func() (result string, err error) {
+		defer func() { // whatever happens, the lock is taken back
+			if r := recover(); r != nil {
+				err = fmt.Errorf("falló la subida: %v", r)
+			}
+			p.mu.Lock()
+		}()
+		return p.up.Upload(ctx, path, *it, settings)
+	}()
+	delete(p.busy, it.Name)
 	if err != nil {
 		p.logLocked(it.Name, "error", err.Error())
 		p.saveLocked()

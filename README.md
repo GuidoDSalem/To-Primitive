@@ -242,7 +242,28 @@ El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el 
 
 **La regla.** Horarios (uno o varios por día), días de la semana y zona horaria (por defecto Buenos Aires); por ejemplo, "todos los días a las 19:00". En cada horario se publica el siguiente video de la cola. **Descartar** saca un video de la cola sin borrarlo: pasa (con su JSON) a `descartados/` dentro de la carpeta de publicación, y aparece abajo en **Descartados**, desde donde se puede ver, descargar o **Restaurar** a la cola. Cada video (en la cola o ya publicado) tiene **Descargar**, que baja el MP4 tal cual, con su nombre. Los videos se pueden subir o bajar, **saltear** (quedan en la carpeta sin publicarse), **publicar ahora** y, ya publicados, **volver a la cola**. Si el servidor estuvo apagado durante varios horarios, al volver publica uno solo (no una ráfaga). La regla, el orden y el registro se guardan en la propia carpeta (`.cola.json`).
 
-**Por ahora la publicación es simulada:** marca el video y lo mueve a `publicados/`, sin subirlo a ninguna plataforma. Así se prueban la cola y la regla; la subida a YouTube (y después TikTok e Instagram) se conecta en el mismo lugar.
+**Plataformas.** En la sección **Plataformas** de la página se conectan las cuentas y se marca dónde publicar: YouTube, TikTok o los dos. "Publicar ahora" y la regla suben el video de verdad a las marcadas; sin ninguna marcada, la publicación es simulada (marca el video y lo mueve a `publicados/` sin subirlo). Si una plataforma falla y la otra no, el video queda en la cola con el error en el registro y lo que ya se subió anotado en su JSON (`uploads`): al reintentar no se publica dos veces. Ya publicado, el video muestra los enlaces (`youtube.com/shorts/…`, `tiktok.com/@…/video/…`).
+
+### Publicar en YouTube y TikTok
+
+Hace falta crear, una vez, una "app" en cada plataforma (son gratis) y poner sus credenciales en el `.env`; después cada cuenta se conecta desde la página con su login.
+
+**YouTube**
+1. En [Google Cloud Console](https://console.cloud.google.com/) creá un proyecto y habilitá **YouTube Data API v3** (APIs y servicios → Biblioteca).
+2. **Pantalla de consentimiento de OAuth**: tipo *Externo*, con tu mail; en *Usuarios de prueba* agregá la cuenta de Google del canal.
+3. **Credenciales → Crear credenciales → ID de cliente de OAuth**, tipo **Aplicación web**, con este *URI de redireccionamiento autorizado*: `http://localhost:8080/api/publish/oauth/youtube/callback` (la página muestra el exacto).
+4. Copiá el ID y el secreto al `.env` (`YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`), reiniciá (`docker compose up --build`) y tocá **Conectar YouTube**.
+
+Con la app en modo *Prueba*, Google puede pedir que vuelvas a conectar cada tanto; publicarla (sin verificación, solo la usás vos) lo evita. La cuota normal alcanza para unas 100 subidas por día. Los videos se publican con la privacidad elegida (por defecto público), categoría "Personas y blogs" y sin ser "para niños"; YouTube decide solo si lo muestra como Short (los reels son verticales y cortos, y la descripción lleva `#Shorts`).
+
+**TikTok**
+1. En [TikTok for Developers](https://developers.tiktok.com/) creá una app y agregale los productos **Login Kit** (plataforma *Desktop*) y **Content Posting API** (con *Direct Post*), con los permisos `user.info.basic` y `video.publish`.
+2. En Login Kit registrá la *Redirect URI* `http://localhost:8080/api/publish/oauth/tiktok/callback`.
+3. Copiá *Client key* y *Client secret* al `.env` (`TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`), reiniciá y tocá **Conectar TikTok**.
+
+**Importante:** hasta que TikTok audite la app, todo lo que se publique por la API queda **privado** ("Solo yo"), y TikTok puede pedir que la cuenta sea privada. La app lo detecta y publica como "Solo yo" (después lo cambiás en TikTok). Para publicar en público hay que pedir la auditoría desde el portal de desarrolladores.
+
+Los permisos de las cuentas se guardan en la carpeta de la biblioteca (`.cuentas.json`, en el volumen de Docker), no en la carpeta de publicación. **Desconectar** los olvida.
 
 **Con Docker**, la carpeta de tu computadora se monta en `/publicar`. Copiá `.env.example` a `.env` y poné ahí la ruta:
 
@@ -381,10 +402,12 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/reels/{id}/spec` · `GET …/source` | Ajustes y origen, para reabrirlo en el editor (`reels.html?lib=`) |
 | `POST /api/reels/{id}/queue` | Copia un reel de la biblioteca a la carpeta de publicación (con título y descripción) |
 | `GET /api/publish` | Regla, cola (con el horario de cada video), publicados y registro |
-| `PUT /api/publish/settings` | La regla: `enabled`, `times` (HH:MM), `days` (0 = domingo), `tz` |
+| `PUT /api/publish/settings` | La regla: `enabled`, `times` (HH:MM), `days` (0 = domingo), `tz`; y dónde publicar: `platforms` (`youtube`, `tiktok`), `youtubePrivacy`, `tiktokPrivacy` |
 | `PUT /api/publish/order` | Orden preferido de la cola (`names`) |
 | `PUT /api/publish/queue/{name}/meta` | Título, descripción y etiquetas (en el JSON del video) |
 | `GET /api/publish/queue/{name}/video` · `GET /api/publish/published/{name}/video` | El video; con `?download=1`, como descarga con su nombre |
+| `GET /api/publish/accounts` | Cuentas: si están configuradas y conectadas, y la dirección de retorno a registrar |
+| `GET /api/publish/accounts/{plataforma}/connect` · `POST …/disconnect` | Conectar (OAuth) o desconectar YouTube / TikTok; vuelven por `/api/publish/oauth/{plataforma}/callback` |
 | `POST /api/publish/queue/{name}/discard` · `POST /api/publish/discarded/{name}/restore` | Descartar un video (a `descartados/`) o devolverlo a la cola; `GET /api/publish/discarded/{name}/video` para verlo |
 | `POST /api/publish/queue/{name}/skip` | Saltear o incluir (`skip`) |
 | `POST /api/publish/queue/{name}/now` | Publicar ya |

@@ -54,6 +54,7 @@ type server struct {
 	lib     *library
 	pub     *publisher // nil: publishing not configured
 	gen     *generator // nil: automatic generation not configured
+	acc     *accounts  // connected YouTube / TikTok accounts
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -81,7 +82,11 @@ func main() {
 	}
 
 	srv := newServer(*dataDir, *reelsDir)
-	pub, err := newPublisher(*publishDir, simulatedUploader{})
+	// The accounts live with the library (a Docker volume), not in the
+	// publishing folder.
+	os.MkdirAll(*reelsDir, 0o755)
+	srv.acc = newAccounts(filepath.Join(*reelsDir, ".cuentas.json"))
+	pub, err := newPublisher(*publishDir, &platformUploader{acc: srv.acc, poll: 3 * time.Second, wait: 90 * time.Second})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -161,6 +166,10 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/publish/queue/{name}/video", srv.withPublisher(srv.pubVideo("")))
 	mux.HandleFunc("POST /api/publish/published/{name}/requeue", srv.withPublisher(srv.pubRequeue))
 	mux.HandleFunc("POST /api/publish/queue/{name}/duplicate", srv.withPublisher(srv.pubDuplicate))
+	mux.HandleFunc("GET /api/publish/accounts", srv.withAccounts(srv.accountsOverview))
+	mux.HandleFunc("GET /api/publish/accounts/{platform}/connect", srv.withAccounts(srv.accountConnect))
+	mux.HandleFunc("POST /api/publish/accounts/{platform}/disconnect", srv.withAccounts(srv.accountDisconnect))
+	mux.HandleFunc("GET /api/publish/oauth/{platform}/callback", srv.withAccounts(srv.accountCallback))
 	mux.HandleFunc("POST /api/publish/queue/{name}/discard", srv.withPublisher(srv.pubAction((*publisher).Discard)))
 	mux.HandleFunc("POST /api/publish/discarded/{name}/restore", srv.withPublisher(srv.pubAction((*publisher).Undiscard)))
 	mux.HandleFunc("GET /api/publish/discarded/{name}/video", srv.withPublisher(srv.pubVideo(discardedDir)))

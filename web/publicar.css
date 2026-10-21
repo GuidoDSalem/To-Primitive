@@ -146,3 +146,12 @@ code { font-size: 11px; color: var(--accent); }
 .discarded-box { margin-top: 28px; }
 .discarded-box summary { cursor: pointer; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
 .item.gone video, .item.gone .body, .item.gone .pos { opacity: .55; }
+.platforms { display: flex; flex-direction: column; gap: 10px; }
+.platform { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.platform.connected { border-color: #7fd18b66; }
+.platform .check { margin: 0; color: var(--text); }
+.platform .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.platform select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
+.platform .row button, .platform .row a.button { font-size: 12px; padding: 4px 8px; margin: 0; }
+.platform code { word-break: break-all; }
+.item .file a { color: var(--accent); }

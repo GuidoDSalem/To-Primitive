@@ -72,6 +72,7 @@ function showRule(s) {
 
 function readRule() {
   return {
+    ...view?.settings, // the platforms are saved on their own
     enabled: $("enabled").checked,
     times: [...$("times").querySelectorAll("input")].map((i) => i.value).filter(Boolean),
     days: [...$("days").children].filter((b) => b.classList.contains("on")).map((b) => +b.dataset.value),
@@ -183,6 +184,15 @@ function itemCard(it, i, published) {
   add("file", `${it.name} · ${fmtDur(it.duration)} · ${it.width}×${it.height} · ${fmtSize(it.size)}`);
   add("desc", it.description + (it.tags?.length ? "\n" + it.tags.map((t) => "#" + t.replace(/^#/, "")).join(" ") : ""));
   for (const w of it.warnings ?? []) add("warn", "⚠ " + w);
+  if (it.publishing) add("when", "Publicando… (subiendo a las plataformas)");
+  for (const [p, u] of Object.entries(it.uploads ?? {})) {
+    const line = Object.assign(document.createElement("div"), { className: "file" });
+    line.append(`${PLATFORM_NAMES[p] ?? p}: `);
+    if (u.url) line.append(Object.assign(document.createElement("a"), { href: u.url, target: "_blank", rel: "noopener", textContent: u.url }));
+    else line.append(`subido (${u.id})`);
+    if (u.msg) line.append(` · ${u.msg}`);
+    body.append(line);
+  }
 
   const actions = document.createElement("div");
   actions.className = "actions";
@@ -206,9 +216,13 @@ function itemCard(it, i, published) {
       button("Textos", "Título, descripción y etiquetas", () => toggleEdit(card, it)),
       ...(it.duplicable ? [button("Duplicar en otro idioma", "Traduce los textos con el modelo local y vuelve a generar el reel", () => toggleDuplicate(card, it))] : []),
       downloadLink(it, false),
-      button("Publicar ahora", "Sin esperar la regla", () => {
-        if (confirm(`¿Publicar "${it.title}" ahora?`)) act(api(`/api/publish/queue/${enc(it.name)}/now`, { method: "POST" }));
-      }),
+      Object.assign(button(it.publishing ? "Publicando…" : "Publicar ahora", "Sin esperar la regla", (e) => {
+        const where = (view.settings.platforms ?? []).map((p) => PLATFORM_NAMES[p]).join(" y ") || "ningún lado (simulado)";
+        if (!confirm(`¿Publicar "${it.title}" ahora en ${where}?`)) return;
+        e.target.disabled = true;
+        e.target.textContent = "Publicando…";
+        act(api(`/api/publish/queue/${enc(it.name)}/now`, { method: "POST" }));
+      }), { disabled: !!it.publishing }),
       button("Descartar", "Sale de la cola y pasa a descartados/ (no se borra; se puede restaurar)", () => {
         if (confirm(`¿Sacar "${it.title}" de la cola? Pasa a descartados/ y lo podés restaurar.`)) act(api(`/api/publish/queue/${enc(it.name)}/discard`, { method: "POST" }));
       }),
@@ -312,9 +326,11 @@ function show(o, ruleToo = false) {
     ? `Regla activa: ${days} a las ${s.times.join(", ")} (${s.tz.replace(/_/g, " ")}).` + (o.nextSlot ? ` Próxima publicación: ${fmtWhen(o.nextSlot)} (${fmtIn(o.nextSlot)}).` : "")
     : "Regla pausada: nada se publica solo. Activala a la izquierda, o publicá a mano.";
   $("dirInfo").textContent = `Carpeta: ${o.dir}`;
-  $("uploaderInfo").textContent = o.uploader.includes("simulated")
-    ? "Plataforma: simulada. Publicar marca el video y lo mueve a publicados/, pero todavía no lo sube a ningún lado."
-    : "Plataforma: " + o.uploader;
+  const plats = (s.platforms ?? []).map((p) => PLATFORM_NAMES[p] ?? p);
+  $("uploaderInfo").textContent = plats.length
+    ? `Publica en ${plats.join(" y ")}.`
+    : "Publicación simulada: marca el video y lo mueve a publicados/, sin subirlo a ningún lado. Elegí plataformas arriba.";
+  drawPlatforms();
 
   const active = o.queue.filter((it) => !it.skipped).length;
   $("queueCount").textContent = `${active}` + (o.queue.length > active ? ` (+${o.queue.length - active} salteados)` : "");
@@ -415,3 +431,100 @@ refresh();
 setInterval(() => { if (!document.hidden && $("viewer").hidden) refresh(); }, 20000);
 refreshCopies();
 setInterval(() => { if (!document.hidden) refreshCopies(); }, 4000);
+
+// ---------- platforms: connected accounts and where to publish ----------
+
+const PLATFORM_NAMES = { youtube: "YouTube", tiktok: "TikTok" };
+const PRIVACY = {
+  youtube: [["public", "Público"], ["unlisted", "No listado"], ["private", "Privado"]],
+  tiktok: [["PUBLIC_TO_EVERYONE", "Público"], ["FOLLOWER_OF_CREATOR", "Seguidores"], ["MUTUAL_FOLLOW_FRIENDS", "Amigos"], ["SELF_ONLY", "Solo yo"]],
+};
+let accounts = [];
+
+async function loadAccounts() {
+  try {
+    accounts = await api("/api/publish/accounts");
+  } catch (e) {
+    $("platStatus").textContent = "No se pudieron leer las cuentas: " + e.message;
+  }
+  drawPlatforms();
+}
+
+async function savePlatforms(change) {
+  try {
+    show(await api("/api/publish/settings", { method: "PUT", json: { ...view.settings, ...change } }));
+    $("platStatus").textContent = "Guardado.";
+  } catch (e) {
+    $("platStatus").textContent = "Error: " + e.message;
+  }
+}
+
+function drawPlatforms() {
+  if (!view) return;
+  const s = view.settings;
+  const on = new Set(s.platforms ?? []);
+  $("platforms").replaceChildren(...accounts.map((a) => {
+    const box = document.createElement("div");
+    box.className = "platform" + (a.connected ? " connected" : "");
+    const head = document.createElement("div");
+    head.className = "head";
+    const use = Object.assign(document.createElement("input"), { type: "checkbox", checked: on.has(a.id), disabled: !a.connected && !on.has(a.id) });
+    use.addEventListener("input", () => {
+      const next = new Set(on);
+      use.checked ? next.add(a.id) : next.delete(a.id);
+      savePlatforms({ platforms: accounts.map((x) => x.id).filter((id) => next.has(id)) });
+    });
+    const label = document.createElement("label");
+    label.className = "check";
+    label.append(use, " Publicar en ", Object.assign(document.createElement("strong"), { textContent: a.name }));
+    head.append(label);
+    const state = document.createElement("div");
+    state.className = "hint";
+    if (!a.configured) {
+      state.textContent = `Falta configurar: ${a.missing} en el .env (ver README).`;
+    } else if (a.connected) {
+      state.textContent = `Conectado${a.account ? " como " + a.account : ""}.`;
+    } else {
+      state.textContent = "Sin conectar.";
+    }
+    const actions = document.createElement("div");
+    actions.className = "row";
+    if (a.configured && !a.connected) {
+      actions.append(Object.assign(document.createElement("a"), { className: "button primary", href: `/api/publish/accounts/${a.id}/connect`, textContent: `Conectar ${a.name}` }));
+    }
+    if (a.connected) {
+      const field = PRIVACY_FIELD[a.id];
+      const sel = document.createElement("select");
+      sel.title = "Privacidad con la que se publica";
+      sel.append(...PRIVACY[a.id].map(([v, t]) => new Option(t, v, false, (s[field] || PRIVACY[a.id][0][0]) === v)));
+      sel.addEventListener("input", () => savePlatforms({ [field]: sel.value }));
+      actions.append(sel, button("Desconectar", "Olvida el permiso guardado", async () => {
+        if (!confirm(`¿Desconectar ${a.name}?`)) return;
+        accounts = await api(`/api/publish/accounts/${a.id}/disconnect`, { method: "POST" });
+        if (on.has(a.id)) await savePlatforms({ platforms: [...on].filter((p) => p !== a.id) });
+        drawPlatforms();
+      }));
+    }
+    box.append(head, state, actions);
+    if (a.configured && !a.connected) {
+      const uri = document.createElement("p");
+      uri.className = "hint";
+      uri.append("Dirección de retorno a registrar: ", Object.assign(document.createElement("code"), { textContent: a.redirect }));
+      box.append(uri);
+    }
+    if (a.connected && on.has(a.id) && a.id === "tiktok") {
+      box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "Mientras TikTok no apruebe (audite) la app, solo deja publicar en privado: se publica como \"Solo yo\" y después lo cambiás en la app." }));
+    }
+    return box;
+  }));
+}
+const PRIVACY_FIELD = { youtube: "youtubePrivacy", tiktok: "tiktokPrivacy" };
+
+loadAccounts();
+{
+  const just = new URLSearchParams(location.search).get("conectado");
+  if (just) {
+    $("platStatus").textContent = `${PLATFORM_NAMES[just] ?? just} conectado ✓. Marcá "Publicar en ${PLATFORM_NAMES[just] ?? just}" para usarlo.`;
+    history.replaceState(null, "", "publicar.html");
+  }
+}

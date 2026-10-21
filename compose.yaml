@@ -17,6 +17,11 @@ services:
       LLM_MODEL: "${LLM_MODEL:-}"
       CLAUDE_MODEL: "${CLAUDE_MODEL:-}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
+      # Publishing on YouTube and TikTok (see README, "Publicar en YouTube y TikTok").
+      YOUTUBE_CLIENT_ID: "${YOUTUBE_CLIENT_ID:-}"
+      YOUTUBE_CLIENT_SECRET: "${YOUTUBE_CLIENT_SECRET:-}"
+      TIKTOK_CLIENT_KEY: "${TIKTOK_CLIENT_KEY:-}"
+      TIKTOK_CLIENT_SECRET: "${TIKTOK_CLIENT_SECRET:-}"
     # Lets the container reach a local model running on this computer
     # (host.docker.internal works on its own on macOS and Windows).
     extra_hosts:

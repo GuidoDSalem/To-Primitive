@@ -19,6 +19,9 @@ func (p *publisher) Discard(name string) error {
 	if err != nil {
 		return err
 	}
+	if p.busy[name] {
+		return errors.New("se está publicando ahora")
+	}
 	dir := filepath.Join(p.dir, discardedDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
