@@ -257,9 +257,13 @@ Hace falta crear, una vez, una "app" en cada plataforma (son gratis) y poner sus
 Con la app en modo *Prueba*, Google puede pedir que vuelvas a conectar cada tanto; publicarla (sin verificación, solo la usás vos) lo evita. La cuota normal alcanza para unas 100 subidas por día. Los videos se publican con la privacidad elegida (por defecto público), categoría "Personas y blogs" y sin ser "para niños"; YouTube decide solo si lo muestra como Short (los reels son verticales y cortos, y la descripción lleva `#Shorts`).
 
 **TikTok**
-1. En [TikTok for Developers](https://developers.tiktok.com/) creá una app y agregale los productos **Login Kit** (plataforma *Desktop*) y **Content Posting API** (con *Direct Post*), con los permisos `user.info.basic` y `video.publish`.
-2. En Login Kit registrá la *Redirect URI* `http://localhost:8080/api/publish/oauth/tiktok/callback`.
-3. Copiá *Client key* y *Client secret* al `.env` (`TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`), reiniciá y tocá **Conectar TikTok**.
+1. En [TikTok for Developers](https://developers.tiktok.com/) creá una app (plataforma **Web**) y agregale los productos **Login Kit** y **Content Posting API** (con *Direct Post*), con los permisos `user.info.basic` y `video.publish`. Como *Terms of Service URL* y *Privacy Policy URL* van las páginas de `docs/` publicadas en GitHub Pages (ver abajo).
+2. TikTok solo acepta direcciones `https` para volver después del login, y la app corre en `localhost`. Por eso se registra como *Redirect URI* una página de GitHub Pages que reenvía al instante a la app: `https://guidodsalem.github.io/To-Primitive/tiktok/callback.html` (es `docs/tiktok/callback.html`; si la app no usa el puerto 8080, cambialo ahí).
+3. En el `.env`: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` y `TIKTOK_REDIRECT_URI` con esa misma dirección. Reiniciá y tocá **Conectar TikTok**.
+
+(Si TikTok aceptara `http://localhost:8080/api/publish/oauth/tiktok/callback`, por ejemplo en una app *Desktop*, dejá `TIKTOK_REDIRECT_URI` vacío: la app vuelve directo y usa PKCE.)
+
+**Páginas públicas (GitHub Pages).** La carpeta `docs/` tiene la presentación, los términos (`terms.html`), la política de privacidad (`privacy.html`) y la página de retorno de TikTok. Para publicarlas: en GitHub, *Settings → Pages → Build and deployment*: *Deploy from a branch*, la rama y la carpeta `/docs`. Quedan en `https://guidodsalem.github.io/To-Primitive/`.
 
 **Importante:** hasta que TikTok audite la app, todo lo que se publique por la API queda **privado** ("Solo yo"), y TikTok puede pedir que la cuenta sea privada. La app lo detecta y publica como "Solo yo" (después lo cambiás en TikTok). Para publicar en público hay que pedir la auditoría desde el portal de desarrolladores.
 

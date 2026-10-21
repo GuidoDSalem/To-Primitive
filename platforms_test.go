@@ -25,6 +25,7 @@ type fakePlatforms struct {
 	mu sync.Mutex
 
 	challenge     string // TikTok PKCE challenge from the authorize URL
+	webRedirect   string // the https page TikTok sends back to (no PKCE then)
 	ytUploads     int
 	ytMeta        map[string]any
 	ttInit        map[string]any
@@ -51,7 +52,9 @@ func (f *fakePlatforms) handler() http.Handler {
 				}
 				if platform == "tiktok" {
 					sum := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
-					if hex.EncodeToString(sum[:]) != f.challenge || r.Form.Get("client_key") != "key" {
+					pkceBad := f.challenge != "" && hex.EncodeToString(sum[:]) != f.challenge
+					webBad := f.challenge == "" && (r.Form.Get("code_verifier") != "" || r.Form.Get("redirect_uri") != f.webRedirect)
+					if pkceBad || webBad || r.Form.Get("client_key") != "key" {
 						w.WriteHeader(400)
 						fmt.Fprint(w, `{"error":"invalid_request","error_description":"pkce"}`)
 						return
@@ -277,5 +280,46 @@ func TestTikTokChunks(t *testing.T) {
 		if chunk != c.chunk || int64(count) != c.count || last != c.last || last > 128<<20 {
 			t.Errorf("tiktokChunks(%d) = %d × %d (last %d)", c.size, chunk, count, last)
 		}
+	}
+}
+
+// TikTok through an https page that forwards to this computer (a "Web"
+// app): that page is the redirect URI, and there's no PKCE.
+func TestTikTokWebRedirect(t *testing.T) {
+	const page = "https://guidodsalem.github.io/To-Primitive/tiktok/callback.html"
+	t.Setenv("TIKTOK_REDIRECT_URI", page)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600, webRedirect: page}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	env := map[string]string{"TIKTOK_CLIENT_KEY": "key", "TIKTOK_CLIENT_SECRET": "secret"}
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(k string) string { return env[k] }
+	acc.ep = platformEndpoints{TikTokAuth: fake.URL + "/tiktok-auth", TikTokAPI: fake.URL}
+	srv := newServer(t.TempDir(), t.TempDir())
+	srv.acc = acc
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	res, _ := noFollow.Get(ts.URL + "/api/publish/accounts/tiktok/connect")
+	u, _ := url.Parse(res.Header.Get("Location"))
+	q := u.Query()
+	if q.Get("redirect_uri") != page || q.Get("code_challenge") != "" {
+		t.Fatalf("authorize %v", q)
+	}
+	// The page forwards the same query to this server's callback.
+	res, err := noFollow.Get(ts.URL + "/api/publish/oauth/tiktok/callback?code=good-code&scopes=video.publish&state=" + q.Get("state"))
+	if err != nil || res.StatusCode != 302 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("callback: %v %s", res.Status, b)
+	}
+	if st := acc.Status(); !st[1].Connected || st[1].Account != "@shapeitup" {
+		t.Errorf("status %+v", st)
+	}
+	var list []map[string]any
+	r2, _ := http.Get(ts.URL + "/api/publish/accounts")
+	json.NewDecoder(r2.Body).Decode(&list)
+	if list[1]["redirect"] != page {
+		t.Errorf("redirect shown %v", list[1]["redirect"])
 	}
 }

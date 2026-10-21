@@ -22,6 +22,7 @@ services:
       YOUTUBE_CLIENT_SECRET: "${YOUTUBE_CLIENT_SECRET:-}"
       TIKTOK_CLIENT_KEY: "${TIKTOK_CLIENT_KEY:-}"
       TIKTOK_CLIENT_SECRET: "${TIKTOK_CLIENT_SECRET:-}"
+      TIKTOK_REDIRECT_URI: "${TIKTOK_REDIRECT_URI:-}"
     # Lets the container reach a local model running on this computer
     # (host.docker.internal works on its own on macOS and Windows).
     extra_hosts:

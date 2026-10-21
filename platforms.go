@@ -162,11 +162,15 @@ func (a *accounts) AuthURL(platform, redirect string) (string, error) {
 		base = a.ep.TikTokAuth
 		q.Set("client_key", id)
 		q.Set("scope", "user.info.basic,video.publish")
-		// PKCE as TikTok wants it for apps on the computer: hex SHA-256.
-		p.verifier = randomHex(32)
-		sum := sha256.Sum256([]byte(p.verifier))
-		q.Set("code_challenge", hex.EncodeToString(sum[:]))
-		q.Set("code_challenge_method", "S256")
+		// Back straight to this computer (a "Desktop" app): PKCE, as TikTok
+		// wants it there (hex SHA-256). Through an https page (a "Web" app,
+		// TIKTOK_REDIRECT_URI) TikTok doesn't use it.
+		if strings.HasPrefix(redirect, "http://") {
+			p.verifier = randomHex(32)
+			sum := sha256.Sum256([]byte(p.verifier))
+			q.Set("code_challenge", hex.EncodeToString(sum[:]))
+			q.Set("code_challenge_method", "S256")
+		}
 	default:
 		return "", errNotFound
 	}
@@ -694,9 +698,14 @@ func (srv *server) withAccounts(h func(http.ResponseWriter, *http.Request, *acco
 	}
 }
 
-// redirectURI is this server's OAuth callback for a platform, as the
-// browser reaches it (it must be registered exactly so).
+// redirectURI is where the platform sends the browser back after the
+// login (it must be registered exactly so): this server's callback, as the
+// browser reaches it, or a page given in the environment that forwards to
+// it (TikTok wants https: e.g. docs/tiktok/callback.html on GitHub Pages).
 func redirectURI(r *http.Request, platform string) string {
+	if u := os.Getenv(strings.ToUpper(platform) + "_REDIRECT_URI"); u != "" {
+		return u
+	}
 	return "http://" + r.Host + "/api/publish/oauth/" + platform + "/callback"
 }
 
