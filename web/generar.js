@@ -70,7 +70,7 @@ async function act(promise) {
   try {
     const o = await promise;
     if (o) show(o);
-    else refresh();
+    else loadPresets().then(refresh);
   } catch (e) {
     alert(e.message);
     refresh();
@@ -149,7 +149,7 @@ let waitingKey = null;
 const langsOf = (text) => text.split(",").map((l) => l.trim().toLowerCase()).filter((l) => /^[a-z]{2}$/.test(l));
 
 function waitingCard(w) {
-  const c = choices.get(w.name) ?? { tpls: new Set(), langs: view.settings.languages.join(", ") || "es, en" };
+  const c = choices.get(w.name) ?? { tpls: new Set(), presets: new Map(), langs: view.settings.languages.join(", ") || "es, en" };
   choices.set(w.name, c);
   const card = document.createElement("div");
   card.className = "wcard";
@@ -174,7 +174,8 @@ function waitingCard(w) {
   const go = button("Generar", "Hace un reel por template e idioma", async () => {
     go.disabled = true;
     try {
-      show(await api(`${url}/start`, { method: "POST", json: { templates: [...c.tpls], languages: langsOf(c.langs) } }));
+      const chosen = Object.fromEntries([...c.tpls].map((t) => [t, [...(c.presets.get(t) ?? [""])]]));
+      show(await api(`${url}/start`, { method: "POST", json: { templates: [...c.tpls], languages: langsOf(c.langs), presets: chosen } }));
       choices.delete(w.name);
     } catch (e) {
       alert(e.message);
@@ -183,13 +184,21 @@ function waitingCard(w) {
   });
   go.className = "primary";
   const update = () => {
-    const n = c.tpls.size * Math.max(1, langsOf(c.langs).length);
+    const per = [...c.tpls].reduce((sum, t) => sum + (c.presets.get(t)?.size || 1), 0);
+    const n = per * Math.max(1, langsOf(c.langs).length);
     count.textContent = c.tpls.size ? `${n} ${n === 1 ? "versión" : "versiones"}` : "Marcá al menos un template";
     go.disabled = !c.tpls.size;
-    for (const el of grid.children) el.classList.toggle("on", c.tpls.has(el.dataset.value));
+    for (const cell of grid.children) {
+      const on = c.tpls.has(cell.dataset.value);
+      cell.querySelector(".tpl").classList.toggle("on", on);
+      const row = cell.querySelector(".tpl-presets");
+      if (row) row.hidden = !on;
+    }
   };
   const tpls = view.byKind[w.kind] ?? [];
   grid.append(...tpls.map((t) => {
+    const cell = Object.assign(document.createElement("div"), { className: "tpl-cell" });
+    cell.dataset.value = t;
     const label = Object.assign(document.createElement("label"), { className: "tpl" });
     label.dataset.value = t;
     const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: c.tpls.has(t) });
@@ -200,12 +209,33 @@ function waitingCard(w) {
     const text = document.createElement("span");
     text.append(name(t), Object.assign(document.createElement("small"), { textContent: Templates.LIST[t]?.desc ?? "" }));
     label.append(box, text);
-    return label;
+    cell.append(label);
+    // Its presets: each one marked is one more version (the base by default).
+    const mine = presets.filter((p) => p.template === t);
+    if (mine.length) {
+      const sel = c.presets.get(t) ?? new Set([""]);
+      c.presets.set(t, sel);
+      const row = Object.assign(document.createElement("div"), { className: "tpl-presets chips", hidden: true });
+      const chip = (id, label, title) => {
+        const b = Object.assign(document.createElement("button"), { type: "button", textContent: label, title });
+        b.classList.toggle("on", sel.has(id));
+        b.addEventListener("click", () => {
+          if (sel.has(id) && sel.size === 1) return; // at least one
+          sel.has(id) ? sel.delete(id) : sel.add(id);
+          b.classList.toggle("on", sel.has(id));
+          update();
+        });
+        return b;
+      };
+      row.append(chip("", "Base", "La configuración base del template"), ...mine.map((p) => chip(p.id, p.name, `Preset "${p.name}"`)));
+      cell.append(row);
+    }
+    return cell;
   }));
   const all = button("Todos", "", () => {
     const every = tpls.every((t) => c.tpls.has(t));
     c.tpls = new Set(every ? [] : tpls);
-    for (const box of grid.querySelectorAll("input")) box.checked = c.tpls.has(box.closest(".tpl").dataset.value);
+    for (const box of grid.querySelectorAll(".tpl > input")) box.checked = c.tpls.has(box.closest(".tpl").dataset.value);
     all.textContent = every ? "Todos" : "Ninguno";
     update();
   });
@@ -254,7 +284,7 @@ function sourceRow(src, jobs) {
   row.className = "job " + (running ? "running" : failed.length ? "error" : finished ? "done" : "queued");
   const what = Object.assign(document.createElement("div"), { className: "what" });
   what.append(Object.assign(document.createElement("strong"), { textContent: src }));
-  if (running) what.append(" ", Object.assign(document.createElement("small"), { textContent: `· ${name(running.template)} · ${(running.lang || "es").toUpperCase()}${running.stage ? " · " + running.stage : ""}` }));
+  if (running) what.append(" ", Object.assign(document.createElement("small"), { textContent: `· ${name(running.template)}${running.presetName ? " (" + running.presetName + ")" : ""} · ${(running.lang || "es").toUpperCase()}${running.stage ? " · " + running.stage : ""}` }));
   const state = Object.assign(document.createElement("div"), { className: "state" });
   state.textContent = finished && !failed.length ? `${done} versiones listas` : `${done} de ${jobs.length} listas` + (failed.length ? ` · ${failed.length} fallaron` : "");
   row.append(what, state);
@@ -323,6 +353,16 @@ function show(o, settingsToo = false) {
   }));
 }
 
+// The templates' presets, to make versions with them.
+let presets = [];
+async function loadPresets() {
+  try {
+    presets = await api("/api/presets");
+  } catch {
+    presets = [];
+  }
+}
+
 async function refresh() {
   try {
     show(await api("/api/auto"));
@@ -331,7 +371,7 @@ async function refresh() {
   }
 }
 $("refresh").addEventListener("click", refresh);
-refresh();
+loadPresets().then(refresh);
 // Faster while something is being generated.
 (function poll() {
   const busy = view?.jobs.some((j) => j.state === "running");

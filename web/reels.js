@@ -2013,6 +2013,8 @@ async function runAuto(id) {
     } else {
       reel.template = job.template;
       applyBase(true);
+      // With a preset: its settings (and song), then this language's texts.
+      if (job.preset) await restoreRecord({ ...job.preset, template: job.template, lang: job.lang || "es" });
       // The texts written for this language, by phrase role.
       reel.lang = job.lang || "es";
       for (const ph of reel.phrases) {

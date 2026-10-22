@@ -99,7 +99,7 @@ func (srv *server) genUpload(w http.ResponseWriter, r *http.Request, g *generato
 
 // Start queues the chosen templates (those that fit the source) in the
 // chosen languages for a waiting source.
-func (g *generator) Start(name string, templates, languages []string) (int, error) {
+func (g *generator) Start(name string, templates, languages []string, presets map[string][]presetRef) (int, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	i := slices.IndexFunc(g.state.Waiting, func(w *WaitingSource) bool { return w.Name == name })
@@ -121,10 +121,10 @@ func (g *generator) Start(name string, templates, languages []string) (int, erro
 		langs = g.state.Settings.langs()
 	}
 	g.state.Waiting = slices.Delete(g.state.Waiting, i, i+1)
-	g.enqueueLocked(w.Name, w.Kind, tpls, langs, "templates elegidos")
+	n := g.enqueueLocked(w.Name, w.Kind, tpls, langs, "templates elegidos", presets)
 	g.saveLocked()
 	g.poke()
-	return len(tpls) * len(langs), nil
+	return n, nil
 }
 
 // Dismiss drops a waiting source: it moves to <input>/descartados/ (the
@@ -152,12 +152,30 @@ func (srv *server) genStart(w http.ResponseWriter, r *http.Request, g *generator
 	var body struct {
 		Templates []string `json:"templates"`
 		Languages []string `json:"languages"`
+		// Presets per template: their ids, "" for the base (none: the base).
+		Presets map[string][]string `json:"presets"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := g.Start(r.PathValue("name"), body.Templates, body.Languages); err != nil {
+	presets := map[string][]presetRef{}
+	saved := srv.presets.List()
+	for t, ids := range body.Presets {
+		for _, id := range ids {
+			if id == "" {
+				presets[t] = append(presets[t], presetRef{})
+				continue
+			}
+			i := slices.IndexFunc(saved, func(p Preset) bool { return p.ID == id && p.Template == t })
+			if i < 0 {
+				http.Error(w, "ese preset ya no existe: actualizá la página", http.StatusBadRequest)
+				return
+			}
+			presets[t] = append(presets[t], presetRef{ID: id, Name: saved[i].Name})
+		}
+	}
+	if _, err := g.Start(r.PathValue("name"), body.Templates, body.Languages, presets); err != nil {
 		pubError(w, err)
 		return
 	}

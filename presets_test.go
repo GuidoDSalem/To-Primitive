@@ -63,3 +63,52 @@ func TestPresets(t *testing.T) {
 		t.Errorf("delete: %d", res.StatusCode)
 	}
 }
+
+// A source made with presets: one version per preset chosen, named after
+// it, and each job brings its settings to the editor.
+func TestGenerateWithPresets(t *testing.T) {
+	g, dir, _ := genFixture(t)
+	g.state.Settings.Enabled, g.state.Settings.SkipChoice = true, false
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	srv.gen = g
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	p, _ := srv.presets.Add("reveal", "Círculos lentos", json.RawMessage(`{"shapes":{"shapes":70,"mode":4},"ending":7}`))
+	srv.presets.Add("levels", "Otro", json.RawMessage(`{}`))
+	if _, err := g.Upload(strings.NewReader("png"), "mona.png"); err != nil {
+		t.Fatal(err)
+	}
+	start := func(body string) int {
+		res, err := http.Post(ts.URL+"/api/auto/inputs/mona.png/start", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.StatusCode
+	}
+	if code := start(`{"templates":["reveal"],"languages":["es"],"presets":{"reveal":["nope"]}}`); code != 400 {
+		t.Errorf("unknown preset: %d", code)
+	}
+	if code := start(`{"templates":["reveal","levels"],"languages":["es","en"],"presets":{"reveal":["","` + p.ID + `"]}}`); code != 200 {
+		t.Fatalf("start: %d", code)
+	}
+	var got []string
+	var withPreset *GenJob
+	for _, j := range g.state.Jobs {
+		got = append(got, j.Template+"/"+j.PresetName+"/"+j.Lang)
+		if j.Preset == p.ID && withPreset == nil {
+			withPreset = j
+		}
+	}
+	if strings.Join(got, ",") != "reveal//es,reveal//en,reveal/Círculos lentos/es,reveal/Círculos lentos/en,levels//es,levels//en" {
+		t.Fatalf("jobs %v", got)
+	}
+	if name := g.outputName(withPreset); name != "mona · Revelado · Círculos lentos · es.mp4" {
+		t.Errorf("output name %q", name)
+	}
+	res, _ := http.Get(ts.URL + "/api/auto/jobs/" + withPreset.ID)
+	var spec struct{ Preset struct{ Ending float64 } }
+	json.NewDecoder(res.Body).Decode(&spec)
+	if spec.Preset.Ending != 7 {
+		t.Errorf("job spec without the preset: %+v", spec)
+	}
+}

@@ -94,10 +94,10 @@ func TestChooseTemplates(t *testing.T) {
 	if len(g.state.Jobs) != 0 || len(g.state.Waiting) != 2 {
 		t.Fatalf("jobs %v, waiting %d", jobsOf(g), len(g.state.Waiting))
 	}
-	if _, err := g.Start("mona.png", []string{"shapes"}, nil); err == nil {
+	if _, err := g.Start("mona.png", []string{"shapes"}, nil, nil); err == nil {
 		t.Error("a video template for a photo")
 	}
-	n, err := g.Start("mona.png", []string{"levels", "nope", "reveal"}, []string{"FR", "it"})
+	n, err := g.Start("mona.png", []string{"levels", "nope", "reveal"}, []string{"FR", "it"}, nil)
 	if err != nil || n != 4 {
 		t.Fatalf("start: %d %v", n, err)
 	}
@@ -108,7 +108,7 @@ func TestChooseTemplates(t *testing.T) {
 	if strings.Join(got, ",") != "reveal:fr,reveal:it,levels:fr,levels:it" {
 		t.Errorf("jobs %v", got)
 	}
-	if _, err := g.Start("mona.png", []string{"reveal"}, nil); err == nil {
+	if _, err := g.Start("mona.png", []string{"reveal"}, nil, nil); err == nil {
 		t.Error("started twice")
 	}
 	g.scan()

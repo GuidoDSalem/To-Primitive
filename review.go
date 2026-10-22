@@ -35,6 +35,7 @@ type ReviewItem struct {
 	Template string `json:"template"`
 	Lang     string `json:"lang"`
 	Stage    string `json:"stage"`
+	Preset   string `json:"preset,omitempty"` // the template's preset it was made with
 }
 
 // ReviewGroup is everything generated from one source.
@@ -59,6 +60,7 @@ func reviewItem(it PubItem, side map[string]any) ReviewItem {
 	r.Template, _ = side["template"].(string)
 	r.Lang, _ = side["lang"].(string)
 	r.Stage, _ = side["stage"].(string)
+	r.Preset, _ = side["preset"].(string)
 	if r.Stage == "" {
 		r.Stage = stageGenerated
 	}
@@ -200,7 +202,7 @@ func (g *generator) Choose(name string) error {
 	// The same template in the undecided languages.
 	chosen := map[string]string{me.Lang: name}
 	for _, o := range others {
-		if o.item.Lang != me.Lang && !decided[o.item.Lang] && o.item.Template == me.Template && chosen[o.item.Lang] == "" {
+		if o.item.Lang != me.Lang && !decided[o.item.Lang] && o.item.Template == me.Template && o.item.Preset == me.Preset && chosen[o.item.Lang] == "" {
 			chosen[o.item.Lang] = o.item.Name
 		}
 	}
@@ -415,7 +417,7 @@ func writeReelSpec(w http.ResponseWriter, name string, side map[string]any, src,
 		}
 		sd := readSidecar(filepath.Join(dir, e.Name()))
 		o := reviewItem(PubItem{Name: e.Name()}, sd)
-		if o.Source == it.Source && o.Template == it.Template && o.Lang != it.Lang && o.Stage != skip {
+		if o.Source == it.Source && o.Template == it.Template && o.Preset == it.Preset && o.Lang != it.Lang && o.Stage != skip {
 			siblings = append(siblings, map[string]any{"name": o.Name, "lang": o.Lang, "stage": o.Stage, "settings": sd["settings"]})
 		}
 	}

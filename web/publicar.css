@@ -179,3 +179,7 @@ code { font-size: 11px; color: var(--accent); }
 .post-done { border: 1px solid #f2b45c88; background: #f2b45c14; border-radius: 10px; padding: 8px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .post-done a { color: var(--accent); overflow-wrap: anywhere; }
 .silent-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 10px; background: #f2b45c22; border: 1px solid #f2b45c; color: #f2b45c; font-size: 11px; font-weight: 600; vertical-align: middle; }
+.tpl-cell { display: flex; flex-direction: column; gap: 4px; }
+.tpl-cell .tpl { flex: 1; }
+.tpl-presets { padding-left: 4px; }
+.tpl-presets button { font-size: 11px; padding: 3px 8px; }

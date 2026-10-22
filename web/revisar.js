@@ -66,6 +66,7 @@ function card(group, v, discarded) {
   info.className = "vinfo";
   info.append(
     Object.assign(document.createElement("strong"), { textContent: tplName(v.template) }),
+    ...(v.preset ? [Object.assign(document.createElement("span"), { className: "meta", textContent: v.preset, title: "Preset" })] : []),
     ...(v.silent ? [Object.assign(document.createElement("span"), { className: "silent-badge", textContent: "🔇 Sin audio", title: "El video no tiene sonido: agregale una canción al refinarlo" })] : []),
     Object.assign(document.createElement("span"), { className: "badge " + (discarded ? "discarded" : v.stage), textContent: discarded ? "Descartada" : STAGES[v.stage] ?? v.stage }),
     Object.assign(document.createElement("span"), { className: "meta", textContent: fmtDur(v.duration) }),

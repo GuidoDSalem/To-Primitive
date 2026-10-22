@@ -79,6 +79,9 @@ type GenJob struct {
 	Kind     string `json:"kind"`   // image | video
 	Template string `json:"template"`
 	Lang     string `json:"lang"`
+	// A preset of the template to make it with ("": the template's base).
+	Preset     string `json:"preset,omitempty"`
+	PresetName string `json:"presetName,omitempty"`
 	// A copy of a queued reel in another language: its texts translated,
 	// the same settings, and the result straight to the publishing queue.
 	Dest     string          `json:"dest,omitempty"`   // "queue" for those
@@ -261,17 +264,32 @@ func (g *generator) addSourceLocked(name, kind, why string) {
 		g.logLocked(name, why, "esperando que elijas los templates")
 		return
 	}
-	g.enqueueLocked(name, kind, g.templatesFor(kind), g.state.Settings.langs(), why)
+	g.enqueueLocked(name, kind, g.templatesFor(kind), g.state.Settings.langs(), why, nil)
 }
 
 // enqueueLocked queues a job per template and language for a source.
-func (g *generator) enqueueLocked(name, kind string, tpls, langs []string, why string) {
+// presetRef names a preset to make a template with (zero: the base).
+type presetRef struct{ ID, Name string }
+
+// enqueueLocked queues a job per template, preset (presets[template]; the
+// base if none) and language for a source.
+func (g *generator) enqueueLocked(name, kind string, tpls, langs []string, why string, presets map[string][]presetRef) int {
+	n := 0
 	for _, t := range tpls {
-		for _, l := range langs {
-			g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, Lang: l, State: "queued", Created: g.now()})
+		refs := presets[t]
+		if len(refs) == 0 {
+			refs = []presetRef{{}}
+		}
+		for _, p := range refs {
+			for _, l := range langs {
+				g.state.Jobs = append(g.state.Jobs, &GenJob{ID: newID(), Source: name, Kind: kind, Template: t, Lang: l,
+					Preset: p.ID, PresetName: p.Name, State: "queued", Created: g.now()})
+				n++
+			}
 		}
 	}
-	g.logLocked(name, why, fmt.Sprintf("%d versiones: %s × %s", len(tpls)*len(langs), strings.Join(tpls, ", "), strings.Join(langs, ", ")))
+	g.logLocked(name, why, fmt.Sprintf("%d versiones: %s × %s", n, strings.Join(tpls, ", "), strings.Join(langs, ", ")))
+	return n
 }
 
 func (g *generator) sourceExistsLocked(name string) bool {
@@ -493,7 +511,11 @@ func sourceFrame(ctx context.Context, path, kind string) []byte {
 }
 
 func (g *generator) outputName(j *GenJob) string {
-	base := strings.TrimSuffix(j.Source, filepath.Ext(j.Source)) + " · " + templateNames[j.Template] + " · " + j.Lang
+	base := strings.TrimSuffix(j.Source, filepath.Ext(j.Source)) + " · " + templateNames[j.Template]
+	if j.PresetName != "" {
+		base += " · " + strings.NewReplacer("/", "-", "\\", "-").Replace(j.PresetName)
+	}
+	base += " · " + j.Lang
 	name := base + ".mp4"
 	for i := 2; ; i++ {
 		if _, err := os.Stat(filepath.Join(g.out, name)); errors.Is(err, os.ErrNotExist) {
@@ -516,7 +538,7 @@ func (g *generator) Complete(id, reelPath string, meta json.RawMessage) (string,
 		return g.completeCopy(j, reelPath, meta)
 	}
 	name := g.outputName(j)
-	src, tpl, lang := j.Source, j.Template, j.Lang
+	src, tpl, lang, preset := j.Source, j.Template, j.Lang, j.PresetName
 	c, hasCopy := g.state.Copies[copyKey(j)][lang]
 	g.mu.Unlock()
 
@@ -531,6 +553,9 @@ func (g *generator) Complete(id, reelPath string, meta json.RawMessage) (string,
 		return "", err
 	}
 	side := map[string]any{"source": src, "template": tpl, "lang": lang, "generated": g.now().Format(time.RFC3339), "settings": meta}
+	if preset != "" {
+		side["preset"] = preset
+	}
 	if hasCopy {
 		side["title"], side["description"], side["tags"], side["hook"] = c.Title, c.Description, c.Tags, c.Hook
 	} else {
@@ -731,6 +756,13 @@ func (srv *server) genJob(w http.ResponseWriter, r *http.Request, g *generator) 
 			"source": map[string]string{"name": j.Source, "type": mime.TypeByExtension(strings.ToLower(filepath.Ext(j.Source)))}}
 		if j.Record != nil { // a copy: the reel's own settings, texts translated
 			out["record"] = j.Record
+		}
+		if j.Preset != "" && srv.presets != nil { // made with a preset of the template
+			for _, p := range srv.presets.List() {
+				if p.ID == j.Preset {
+					out["preset"] = p.Settings
+				}
+			}
 		}
 		// The on-screen texts for this language, by phrase role.
 		if c, ok := g.state.Copies[copyKey(j)][j.Lang]; ok {
