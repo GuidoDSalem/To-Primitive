@@ -11,6 +11,7 @@ services:
       PUBLISH_HOST_DIR: "${PUBLISH_HOST_DIR:-./publicar}"
       INPUT_HOST_DIR: "${INPUT_HOST_DIR:-./entrada}"
       GENERATED_HOST_DIR: "${GENERATED_HOST_DIR:-./generados}"
+      AUDIOS_HOST_DIR: "${AUDIOS_HOST_DIR:-./audios}"
       # Who writes titles, descriptions, tags and translations (see .env.example).
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       LLM_BASE_URL: "${LLM_BASE_URL:-}"
@@ -36,6 +37,8 @@ services:
       - "${INPUT_HOST_DIR:-./entrada}:/entrada"
       # and the reels generated from them.
       - "${GENERATED_HOST_DIR:-./generados}:/generados"
+      # the audio bank, songs to pick from in the reel editor (only read).
+      - "${AUDIOS_HOST_DIR:-./audios}:/audios:ro"
 
 volumes:
   reels:

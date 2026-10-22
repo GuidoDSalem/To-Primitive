@@ -27,7 +27,7 @@ const reel = {
   duration: { preset: "15", free: 20 },
   ending: null,     // seconds the original is shown at the end (0: not shown; null: the template's)
   preset: null,     // id of the preset applied (null: the template's base)
-  audio: { mode: "none", file: null, url: null }, // mode: "none" | "source" | "file"
+  audio: { mode: "none", file: null, url: null, bank: null }, // mode: "none" | "source" | "file"; bank: its name in the audio bank
   phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
   touched: new Set(), // settings changed by hand: a template's base doesn't override them
   lang: "es",       // language of the texts drawn on the reel
@@ -1497,12 +1497,93 @@ $("audioFile").addEventListener("change", (e) => {
   const f = e.target.files[0];
   if (!f) return;
   if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
-  Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f) });
+  Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f), bank: null });
   $("audioName").textContent = f.name;
   e.target.value = "";
   refreshUI();
 });
 for (const id of ["volume", "fadeOut", "audioStart"]) $(id).addEventListener("input", refreshUI);
+
+// ---------- audio bank ----------
+
+// The songs of the bank folder: listen to one, use it. The one used is kept
+// with the reel (and with a preset saved from it), like any song.
+const bank = { items: null, dir: "", exists: true, listening: null };
+const bankPlayer = new Audio();
+bankPlayer.addEventListener("ended", () => { bank.listening = null; drawBank(); });
+
+async function loadBank() {
+  try {
+    const o = await (await fetch("/api/audios")).json();
+    Object.assign(bank, { items: o.items, dir: o.dir, exists: o.exists });
+  } catch {
+    bank.items = [];
+  }
+  drawBank();
+}
+
+const bankURL = (name) => "/api/audios/files/" + name.split("/").map(encodeURIComponent).join("/");
+
+function drawBank() {
+  if (!bank.items) return;
+  const q = $("bankSearch").value.trim().toLowerCase();
+  const shown = bank.items.filter((it) => it.name.toLowerCase().includes(q));
+  $("bankCount").textContent = bank.items.length ? `(${bank.items.length})` : "";
+  $("bankSearch").hidden = bank.items.length < 6;
+  $("bankInfo").textContent = !bank.exists
+    ? `No encuentro la carpeta ${bank.dir}: revisá AUDIOS_HOST_DIR en el .env y recreá el contenedor.`
+    : !bank.items.length ? `Dejá canciones (mp3, m4a, wav…) en ${bank.dir} y tocá ↻.` : "";
+  $("bankList").replaceChildren(...shown.map((it) => {
+    const row = document.createElement("div");
+    row.className = "bank-row" + (reel.audio.mode === "file" && reel.audio.bank === it.name ? " on" : "");
+    const listen = Object.assign(document.createElement("button"), {
+      className: "listen", textContent: bank.listening === it.name ? "■" : "▶", title: "Escuchar",
+    });
+    listen.addEventListener("click", () => {
+      if (bank.listening === it.name) {
+        bankPlayer.pause();
+        bank.listening = null;
+      } else {
+        bankPlayer.src = bankURL(it.name);
+        bankPlayer.play().catch(() => {});
+        bank.listening = it.name;
+      }
+      drawBank();
+    });
+    const dir = it.name.includes("/") ? it.name.slice(0, it.name.lastIndexOf("/") + 1) : "";
+    const name = Object.assign(document.createElement("button"), { className: "name", title: "Usar en el reel" });
+    name.append(Object.assign(document.createElement("small"), { textContent: dir }), it.name.slice(dir.length).replace(/\.[^.]+$/, ""));
+    name.addEventListener("click", () => useBankAudio(it.name));
+    row.append(listen, name);
+    return row;
+  }));
+  if (q && !shown.length) $("bankList").append(Object.assign(document.createElement("p"), { className: "hint", textContent: "Nada con ese nombre." }));
+  $("bankList").append(Object.assign(document.createElement("button"), { className: "reload", textContent: "↻", title: "Volver a leer la carpeta", onclick: loadBank }));
+}
+
+async function useBankAudio(name) {
+  bankPlayer.pause();
+  bank.listening = null;
+  $("audioName").textContent = "Cargando " + name + "…";
+  try {
+    const res = await fetch(bankURL(name));
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const f = new File([blob], name.split("/").pop(), { type: blob.type });
+    if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
+    Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f), bank: name });
+    $("audioName").textContent = f.name + " (del banco)";
+    $("audioStart").value = 0;
+  } catch (e) {
+    $("audioName").textContent = "No se pudo cargar: " + e.message;
+  }
+  drawBank();
+  refreshUI();
+  player.seek(player.time);
+}
+
+$("bankSearch").addEventListener("input", drawBank);
+loadBank();
 
 // ---------- export ----------
 
@@ -1524,7 +1605,7 @@ function reelMeta(comp, res, seconds) {
     base: reel.base, changedByHand: [...reel.touched], lang: reel.lang,
     phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
     brand: $("tBrand").value,
-    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, bank: a.mode === "file" ? a.bank : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
     export: { width: res.width, height: res.height, fps: 30, codec: res.codec, seconds: Math.round(seconds * 10) / 10 },
   };
 }
@@ -1805,9 +1886,10 @@ async function restoreSong(a) {
     const blob = await res.blob();
     const f = new File([blob], a.name || a.kept.split("/").pop(), { type: blob.type });
     if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
-    Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f) });
-    $("audioName").textContent = f.name;
+    Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f), bank: a.bank ?? null });
+    $("audioName").textContent = f.name + (a.bank ? " (del banco)" : "");
     $("audioStart").value = a.start ?? 0;
+    drawBank();
   } catch (e) {
     $("audioName").textContent = `No se pudo recuperar la canción (${a.name}): volvé a elegirla`;
   }
@@ -2067,7 +2149,7 @@ function presetSettings() {
     changedByHand: [...reel.touched],
     phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
     brand: $("tBrand").value,
-    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, bank: a.mode === "file" ? a.bank : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
   };
 }
 

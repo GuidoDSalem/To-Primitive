@@ -56,6 +56,7 @@ type server struct {
 	gen     *generator // nil: automatic generation not configured
 	acc     *accounts  // connected YouTube / TikTok accounts
 	presets *presetStore
+	audios  string // the audio bank's folder (audios.go)
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -70,6 +71,7 @@ func main() {
 	publishDir := flag.String("publish", envOr("PUBLISH_DIR", "publicar"), "folder of videos waiting to be published")
 	inputDir := flag.String("input", envOr("INPUT_DIR", "entrada"), "folder of photos and videos to turn into reels automatically")
 	generatedDir := flag.String("generated", envOr("GENERATED_DIR", "generados"), "folder where automatically generated reels go")
+	audiosDir := flag.String("audios", envOr("AUDIOS_DIR", "audios"), "folder of songs to pick from in the reel editor")
 	flag.Parse()
 
 	// Videos don't survive a restart (sessions live in memory), so start clean.
@@ -83,6 +85,7 @@ func main() {
 	}
 
 	srv := newServer(*dataDir, *reelsDir)
+	srv.audios = *audiosDir
 	// The accounts live with the library (a Docker volume), not in the
 	// publishing folder.
 	os.MkdirAll(*reelsDir, 0o755)
@@ -128,6 +131,8 @@ func (srv *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(web))
 	mux.HandleFunc("POST /api/sessions", srv.create)
+	mux.HandleFunc("GET /api/audios", srv.audioList)
+	mux.HandleFunc("GET /api/audios/files/{name...}", srv.audioFile)
 	mux.HandleFunc("GET /api/sessions/{id}/events", srv.withSession(srv.events))
 	mux.HandleFunc("PUT /api/sessions/{id}/params", srv.withSession(srv.params))
 	mux.HandleFunc("GET /api/sessions/{id}/export", srv.withSession(srv.export))

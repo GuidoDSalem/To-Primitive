@@ -236,9 +236,15 @@
           <button data-value="file">Archivo propio</button>
         </div>
         <div id="audioFileBox" style="margin-top:10px" hidden>
+          <div class="field bank">
+            <label for="bankSearch">Banco de audios <span id="bankCount" class="kinds"></span></label>
+            <input id="bankSearch" type="search" placeholder="Buscar en el banco…">
+            <div id="bankList" class="bank-list"></div>
+            <p id="bankInfo" class="hint"></p>
+          </div>
           <label class="button wide">
             <input id="audioFile" type="file" accept="audio/*,video/*" hidden>
-            Elegir audio…
+            Elegir otro archivo…
           </label>
           <p id="audioName" class="hint">Ningún archivo elegido.</p>
           <div class="field" style="margin-top:10px">
