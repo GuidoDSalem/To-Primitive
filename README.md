@@ -34,7 +34,7 @@ go test ./...
   - **PNG** al tamaño que elijas.
   - **SVG** vectorial.
   - **GIF** animado del proceso.
-- **Progreso a la vista**: mientras se procesa algo, en cualquier página aparece arriba a la izquierda una dona que se va completando, con el porcentaje en el centro. En el editor de reels va entre la configuración y el reel, arriba, quieta aunque scrollees los ajustes. Sigue el cálculo de formas o keyframes, la grabación y la exportación de videos, las fotos y videos que se suben, las versiones que se generan (en Generar, Revisar y Publicar) y la subida a YouTube y TikTok. Si hay varias cosas a la vez, muestra el promedio; al pasar el mouse dice qué está procesando. Cuando algo no tiene porcentaje, gira sin número.
+- **Progreso a la vista**: mientras se procesa algo, en cualquier página aparece arriba a la izquierda una dona que se va completando, con el porcentaje en el centro y, al costado, cuánto falta más o menos (según el ritmo del último medio minuto; aparece después de unos segundos de avance). En el editor de reels va entre la configuración y el reel, arriba, quieta aunque scrollees los ajustes. Sigue el cálculo de formas o keyframes, la grabación y la exportación de videos, las fotos y videos que se suben, las versiones que se generan (en Generar, Revisar y Publicar) y la subida a YouTube y TikTok. Si hay varias cosas a la vez, muestra el promedio; al pasar el mouse dice qué está procesando. Cuando algo no tiene porcentaje, gira sin número.
 
 ## Grabar la construcción de una imagen
 
