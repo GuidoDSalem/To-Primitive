@@ -186,7 +186,7 @@ Próximas etapas: una cola de publicación con una regla configurable (por ejemp
 
 
 
-**Original al final.** En los templates que terminan mostrando la foto o el video original (Revelado, Video en formas, ¿En qué nivel?, Contador y Mosaico), en la sección Duración se elige cuántos segundos antes del final empieza a aparecer el original, o "Automático" para el momento que trae el template. Lo anterior (armado de formas, niveles, contador) se acomoda para terminar antes. Se guarda con el reel (`ending` en su registro).
+**Original al final.** En los templates que terminan mostrando la foto o el video original (Revelado, Video en formas, ¿En qué nivel?, Contador y Mosaico), en la sección Duración se elige cuántos segundos antes del final empieza a aparecer el original; en 0 no se muestra (las formas siguen hasta el final). Cada template trae su valor en la configuración base (Revelado 5,5 s, ¿En qué nivel? 3 s, Video en formas, Contador y Mosaico 2 s), que es el que usa el generador; cambiarlo a mano lo mantiene al cambiar de template, y "Usar el de la configuración base" vuelve al del template. Lo anterior (armado de formas, niveles, contador) se acomoda para terminar antes. Se guarda con el reel (`ending` en su registro).
 
 ## Generar reels automáticamente
 

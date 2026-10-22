@@ -25,7 +25,7 @@ const reel = {
   framing: { mode: "fill", zoom: 1, px: 0.5, py: 0.5 },
   template: "auto",
   duration: { preset: "15", free: 20 },
-  ending: null,     // seconds the original is shown at the end (null: the template's)
+  ending: null,     // seconds the original is shown at the end (0: not shown; null: the template's)
   audio: { mode: "none", file: null, url: null }, // mode: "none" | "source" | "file"
   phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
   touched: new Set(), // settings changed by hand: a template's base doesn't override them
@@ -908,11 +908,18 @@ $("durPreset").addEventListener("click", (e) => {
 });
 $("ending").addEventListener("input", () => {
   reel.ending = +$("ending").value;
+  reel.touched.add("ending");
   refreshUI();
   if (!player.playing) player.draw();
 });
+// Back to the template's base value (and following it when switching).
 $("endingAuto").addEventListener("input", () => {
-  reel.ending = $("endingAuto").checked ? null : +$("ending").value;
+  if ($("endingAuto").checked) {
+    reel.touched.delete("ending");
+    reel.ending = Templates.LIST[templateId()].base.ending ?? null;
+  } else {
+    reel.touched.add("ending");
+  }
   refreshUI();
   if (!player.playing) player.draw();
 });
@@ -959,6 +966,7 @@ function applyBase(force = false) {
     for (const sel of ["recOrder", "recCurve", "recEffect"]) $(sel).dispatchEvent(new Event("change"));
     Picker.refresh();
   }
+  if (!touched.has("ending")) reel.ending = base.ending ?? null;
   if (!touched.has("phrases")) reel.phrases = Templates.phrasesFor(id, reel.phrases);
   reel.base = id;
   renderPhrases();
@@ -1417,11 +1425,11 @@ function refreshUI() {
     const comp = composition();
     const length = comp?.duration ?? reelSeconds();
     $("ending").max = Math.max(1, Math.floor(length * 0.85 * 2) / 2);
-    $("endingAuto").checked = reel.ending == null;
-    $("ending").disabled = reel.ending == null;
+    const fromBase = !reel.touched.has("ending");
+    $("endingAuto").checked = fromBase;
     const shown = reel.ending ?? (comp && Number.isFinite(comp.originalFrom) ? comp.duration - comp.originalFrom : null);
-    if (reel.ending == null && shown != null) $("ending").value = Math.round(shown * 2) / 2;
-    $("endingOut").textContent = shown == null ? "" : `${shown.toFixed(1)} s` + (reel.ending == null ? " (automático)" : "");
+    if (shown != null) $("ending").value = Math.round(shown * 2) / 2;
+    $("endingOut").textContent = shown == null ? "" : (shown <= 0 ? "0 s · sin original" : `${(+shown).toFixed(1)} s`) + (fromBase ? " (base del template)" : "");
   }
 
   // Audio and export.
@@ -1755,7 +1763,7 @@ function restoreRecord(m) {
     if (a.flow !== undefined) $("videoFlow").checked = a.flow;
     if (a.interp) $("interp").value = a.interp;
   }
-  reel.ending = m.ending ?? null;
+  if (m.ending != null) reel.ending = m.ending; // else: the template's base (from applyBase)
   if (m.durationChoice) {
     reel.duration = { ...reel.duration, ...m.durationChoice };
     $("durFree").value = reel.duration.free;
@@ -1779,6 +1787,8 @@ function restoreRecord(m) {
   }
   // Everything restored counts as chosen: switching templates keeps it.
   reel.touched = new Set([...(m.changedByHand || []), "duration", "shapes", "mode", "build", "phrases"]);
+  // A time for the original other than the template's base: chosen by hand.
+  if (m.ending != null && m.ending !== (Templates.LIST[templateId()]?.base.ending ?? null)) reel.touched.add("ending");
   return restoreSong(m.audio);
 }
 

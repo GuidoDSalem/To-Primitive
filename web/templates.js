@@ -29,7 +29,7 @@ const Templates = (() => {
     reveal: {
       name: "Revelado", kinds: ["image"], aspect: 9 / 16,
       desc: "Las formas arman la imagen y después aparece la foto real.",
-      base: { duration: 15, shapes: 150, mode: 1, build: BUILD, phrases: [title(0.01, 0.68, { extend: true }), closing(0.74, 1)] },
+      base: { duration: 15, shapes: 150, mode: 1, build: BUILD, ending: 5.5, phrases: [title(0.01, 0.68, { extend: true }), closing(0.74, 1)] },
       make: makeReveal, ending: true, // ends showing the original (how long: src.ending)
     },
     loop: {
@@ -42,14 +42,14 @@ const Templates = (() => {
     shapes: {
       name: "Video en formas", kinds: ["video"], aspect: 9 / 16,
       desc: "El video convertido en formas, con un fundido al original al final.",
-      base: { duration: 15, shapes: 150, mode: 1, build: BUILD, phrases: [title(0.01, 0.68, { extend: true }), closing(0.74, 1)] },
+      base: { duration: 15, shapes: 150, mode: 1, build: BUILD, ending: 2, phrases: [title(0.01, 0.68, { extend: true }), closing(0.74, 1)] },
       make: makeShapesVideo, ending: true, // ends showing the original (how long: src.ending)
     },
     levels: {
       name: "¿En qué nivel?", kinds: ["image", "video"], aspect: 9 / 16,
       desc: "Se completa de a niveles (10, 25, 50… formas) y al final aparece el original: ¿en qué nivel la adivinaste?",
       base: {
-        duration: 15, shapes: 150, mode: 1, build: BUILD,
+        duration: 15, shapes: 150, mode: 1, build: BUILD, ending: 3,
         phrases: [
           phrase("question", "¿En qué nivel la adivinaste?", 0.01, 0.8, "top", "question"),
           phrase("level", "Nivel {nivel} · {formas} formas", 0, 0.8, "foot", "label"),
@@ -84,7 +84,7 @@ const Templates = (() => {
       name: "Contador", kinds: ["image"], aspect: 9 / 16,
       desc: "Las formas se suman con un contador grande; al final, la foto.",
       base: {
-        duration: 12, shapes: 300, mode: 1, build: { ...BUILD, curve: "inOutCubic" },
+        duration: 12, shapes: 300, mode: 1, build: { ...BUILD, curve: "inOutCubic" }, ending: 2,
         phrases: [phrase("counter", "{n} {tipo}", 0, 1, "top", "counter"), closing(0.88, 1)],
       },
       make: makeCounter, ending: true, // ends showing the original (how long: src.ending)
@@ -93,7 +93,7 @@ const Templates = (() => {
       name: "Mosaico de niveles", kinds: ["image", "video"], aspect: 9 / 16,
       desc: "Cuatro cuadros con cada vez más formas (10, 50, 100… todas) y al final el original.",
       base: {
-        duration: 12, shapes: 500, mode: 1, build: BUILD,
+        duration: 12, shapes: 500, mode: 1, build: BUILD, ending: 2,
         phrases: [
           phrase("question", "¿Cuántas formas hacen falta?", 0.01, 0.8, "top", "question"),
           closing(0.86, 1, "¿Con cuál la reconociste? 👇"),
@@ -211,9 +211,10 @@ const Templates = (() => {
 
   // When the original starts appearing at the end and how long its fade
   // takes: the template's own moment, or src.ending seconds before the end
-  // when it's set (null: the template's).
+  // when it's set (null: the template's; 0: the original isn't shown).
   function finale(src, D, from, fade) {
     if (src.ending == null) return [from, fade];
+    if (src.ending <= 0) return [D, 1e-3]; // never reached: the shapes until the end
     const e = clamp(src.ending, 0.3, 0.85 * D);
     return [D - e, Math.min(fade, e)];
   }
