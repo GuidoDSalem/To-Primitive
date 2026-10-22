@@ -1387,6 +1387,8 @@ function refreshUI() {
   // The live session, as in the editor.
   const target = +$("shapes").value;
   $("pause").textContent = live.paused ? "Continuar" : "Pausar";
+  if (has && live.id && live.running && !live.paused) Busy.set("shapes", Math.min(live.count, target) / target, "Formas");
+  else Busy.done("shapes");
   if (has) {
     const n = Math.min(live.count, target);
     $("liveStatus").textContent = !live.id ? "Preparando…"

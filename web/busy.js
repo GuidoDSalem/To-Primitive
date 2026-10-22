@@ -4,7 +4,9 @@
 // processed advances, with the percent in the middle. It follows the page's
 // own progress bars (every visible <progress> not yet full) and whatever a
 // page reports with Busy.set(key, fraction, label) / Busy.done(key); a
-// fraction of null means "working on it", without a percent.
+// fraction of null means "working on it", without a percent. A page with
+// <body data-busy="beside"> has it next to the settings panel instead, at
+// the top of what it shows (the reel editor: between settings and reel).
 
 const Busy = (() => {
   const tasks = new Map(); // key -> { fraction, label }
@@ -21,6 +23,14 @@ const Busy = (() => {
     ring = box.querySelector(".fill");
     text = box.querySelector("span");
     document.body.append(box);
+    const panel = document.getElementById("panel");
+    if (document.body.dataset.busy === "beside" && panel) {
+      box.classList.add("beside");
+      const place = () => { box.style.left = panel.getBoundingClientRect().right + 14 + "px"; };
+      new ResizeObserver(place).observe(panel);
+      addEventListener("resize", place);
+      place();
+    }
     new MutationObserver((ms) => {
       if (ms.some((m) => !box.contains(m.target))) update();
     }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["value", "max", "hidden", "open"] });
@@ -73,7 +83,7 @@ const Busy = (() => {
     const labels = [...new Set(list.map((t) => t.label).filter(Boolean))];
     box.title = (list.length > 1 ? `${list.length} procesos` : "Procesando") + (labels.length ? ": " + labels.join(" · ") : "");
     box.classList.add("on");
-    document.documentElement.classList.add("busy-on");
+    if (!box.classList.contains("beside")) document.documentElement.classList.add("busy-on");
   }
 
   function show(fraction, spinning) {
