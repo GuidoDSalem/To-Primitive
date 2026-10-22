@@ -148,11 +148,35 @@ function show(o) {
   const count = (s) => all.filter((v) => v.stage === s).length;
   $("summary").textContent = `${count("generated")} para elegir · ${count("chosen")} para refinar · ${count("refined")} listas para la cola`;
   $("dirInfo").textContent = `Carpeta: ${o.generated} (las descartadas, en descartados/)`;
+  if (o.groups.some((g) => g.pending) && !genTimer) followGenerator();
   // Keep the open details and anything being edited.
   const opened = new Set([...document.querySelectorAll(".group details[open]")].map((d) => d.closest(".group").querySelector("h3").textContent));
   if (document.querySelector("#groups .edit")) return;
   $("groups").replaceChildren(...(o.groups.length ? o.groups.map(groupBox) : [Object.assign(document.createElement("p"), { className: "none-yet", textContent: "Todavía no hay versiones: dejá fotos o videos en la carpeta de entrada." })]));
   for (const d of document.querySelectorAll(".group details")) if (opened.has(d.closest(".group").querySelector("h3").textContent)) d.open = true;
+}
+
+// While versions are being generated, the donut follows the generator.
+let genTimer = null;
+async function followGenerator() {
+  genTimer = null;
+  let jobs = [];
+  try {
+    jobs = (await api("/api/auto")).jobs ?? [];
+  } catch { /* the generator may be off */ }
+  const mine = jobs.filter((j) => j.dest !== "queue");
+  const active = new Set(mine.filter((j) => j.state === "queued" || j.state === "running").map((j) => j.source));
+  const batch = mine.filter((j) => active.has(j.source) && j.state !== "error");
+  if (!batch.length) {
+    Busy.done("gen");
+    if (followGenerator.was) refresh();
+    followGenerator.was = false;
+    return;
+  }
+  const done = batch.reduce((s, j) => s + (j.state === "done" ? 1 : j.state === "running" ? j.progress || 0 : 0), 0);
+  Busy.set("gen", done / batch.length, `Generando ${batch.length - Math.floor(done)} versiones`);
+  followGenerator.was = true;
+  genTimer = setTimeout(followGenerator, 2000);
 }
 
 async function refresh() {

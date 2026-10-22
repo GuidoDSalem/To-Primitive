@@ -219,6 +219,7 @@ type PubItem struct {
 	Warnings    []string                `json:"warnings,omitempty"`
 	Silent      bool                    `json:"silent,omitempty"`     // the file has no sound track
 	Publishing  bool                    `json:"publishing,omitempty"` // being uploaded now
+	Progress    float64                 `json:"progress,omitempty"`   // how much of it is up (0..1), while publishing
 	Uploads     map[string]uploadResult `json:"uploads,omitempty"`    // where it already went (by platform)
 }
 
@@ -244,7 +245,7 @@ type publisher struct {
 	mu    sync.Mutex
 	state pubState
 	probe map[string]mediaInfo // by name|size|mtime
-	busy  map[string]bool      // being published now (the upload runs unlocked)
+	busy  map[string]float64   // being published now (the upload runs unlocked): how much is up
 
 	editable func(side map[string]any) bool // whether a video's source can be found (set by the server)
 }
@@ -253,7 +254,7 @@ func newPublisher(dir string, up uploader) (*publisher, error) {
 	if err := os.MkdirAll(filepath.Join(dir, publishedDir), 0o755); err != nil {
 		return nil, err
 	}
-	p := &publisher{dir: dir, up: up, now: time.Now, probe: map[string]mediaInfo{}, busy: map[string]bool{}}
+	p := &publisher{dir: dir, up: up, now: time.Now, probe: map[string]mediaInfo{}, busy: map[string]float64{}}
 	p.state.Settings = defaultSettings()
 	if b, err := os.ReadFile(filepath.Join(dir, stateFile)); err == nil {
 		if err := json.Unmarshal(b, &p.state); err != nil {
@@ -409,7 +410,7 @@ func (p *publisher) videosIn(dir string) []PubItem {
 func (p *publisher) queueLocked() []PubItem {
 	items := p.videosIn(p.dir)
 	for i := range items {
-		items[i].Publishing = p.busy[items[i].Name]
+		items[i].Progress, items[i].Publishing = p.busy[items[i].Name]
 	}
 	rank := map[string]int{}
 	for i, n := range p.state.Order {
@@ -594,7 +595,7 @@ func (p *publisher) PublishWith(ctx context.Context, name, why string, choice *P
 	defer p.mu.Unlock()
 	var it *PubItem
 	for _, q := range p.queueLocked() {
-		if (name == "" && !q.Skipped && !p.busy[q.Name]) || q.Name == name {
+		if _, busy := p.busy[q.Name]; (name == "" && !q.Skipped && !busy) || q.Name == name {
 			q := q
 			it = &q
 			break
@@ -611,10 +612,10 @@ func (p *publisher) PublishWith(ctx context.Context, name, why string, choice *P
 	path := filepath.Join(p.dir, it.Name)
 	// Uploading takes a while: the queue stays usable meanwhile, and this
 	// video can't be moved or edited until it's done.
-	if p.busy[it.Name] {
+	if _, busy := p.busy[it.Name]; busy {
 		return "", errors.New("ya se está publicando")
 	}
-	p.busy[it.Name] = true
+	p.busy[it.Name] = 0
 	settings := p.state.Settings
 	if choice != nil {
 		for _, pl := range choice.Platforms {
@@ -633,7 +634,14 @@ func (p *publisher) PublishWith(ctx context.Context, name, why string, choice *P
 			}
 			p.mu.Lock()
 		}()
-		return p.up.Upload(ctx, path, *it, settings)
+		name := it.Name
+		return p.up.Upload(withProgress(ctx, func(f float64) {
+			p.mu.Lock()
+			if _, ok := p.busy[name]; ok {
+				p.busy[name] = f
+			}
+			p.mu.Unlock()
+		}), path, *it, settings)
 	}()
 	delete(p.busy, it.Name)
 	if err != nil {

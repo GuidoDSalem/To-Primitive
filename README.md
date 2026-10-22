@@ -34,6 +34,7 @@ go test ./...
   - **PNG** al tamaño que elijas.
   - **SVG** vectorial.
   - **GIF** animado del proceso.
+- **Progreso a la vista**: mientras se procesa algo, en cualquier página aparece arriba a la izquierda una dona que se va completando, con el porcentaje en el centro. Sigue el cálculo de formas o keyframes, la grabación y la exportación de videos, las fotos y videos que se suben, las versiones que se generan (en Generar, Revisar y Publicar) y la subida a YouTube y TikTok. Si hay varias cosas a la vez, muestra el promedio; al pasar el mouse dice qué está procesando. Cuando algo no tiene porcentaje, gira sin número.
 
 ## Grabar la construcción de una imagen
 
@@ -373,6 +374,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
   - En el servidor, `ffmpeg` decodifica los frames por un pipe y agrega el audio al MP4 exportado.
   - En el navegador (`web/motion.js`, `web/mp4.js`): interpolación, dibujo, WebCodecs, un muxer MP4 propio y la generación de Lottie, sin librerías.
 - **Grabación de imágenes** (`web/build.js`): línea de tiempo con curvas de easing, orden de aparición y efectos. Reutiliza el dibujo y el exportador MP4.
+- **Progreso** (`web/busy.js`): la dona de arriba a la izquierda. Sigue sola cada `<progress>` visible que no esté completo, y lo que cada página informa con `Busy.set(clave, fracción, etiqueta)` / `Busy.done(clave)` (fracción `null` = sin porcentaje). La subida a las plataformas informa cuánto subió (`progress` en los videos de la cola que se están publicando).
 - **Selectores visuales** (`web/picker.js`): reemplazan un `<select>` por tarjetas animadas, que solo se dibujan mientras están en pantalla y a 24 fps. El `<select>` queda oculto como fuente del valor.
 - **Escena 3D** (`web/scene3d.js`): usa la misma línea de tiempo con cámara en perspectiva y piezas en profundidad.
 - **En vivo:**

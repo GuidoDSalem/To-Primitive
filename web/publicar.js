@@ -343,6 +343,7 @@ function show(o, ruleToo = false) {
   $("discardedBox").hidden = !o.discarded.length;
   $("discCount").textContent = o.discarded.length;
   $("discarded").replaceChildren(...o.discarded.map(discardedCard));
+  trackPublishing(o.queue);
   // Don't redraw the queue while a title or description in it is being edited.
   const typing = $("queue").contains(document.activeElement) && document.activeElement.matches("input, textarea");
   if (!typing) {
@@ -423,6 +424,32 @@ const preview = (() => {
   });
   return { open, close, setChannel: (c) => { if (c) channel = c; } };
 })();
+
+// While a video goes up, the donut follows it, asking often but without
+// redrawing the queue; when it's done, the queue is drawn again.
+const publishing = new Set();
+let followTimer = null;
+
+function trackPublishing(queue) {
+  const now = new Set(queue.filter((it) => it.publishing).map((it) => it.name));
+  for (const it of queue) if (it.publishing) Busy.set("pub:" + it.name, it.progress || 0, "Publicando " + it.title);
+  for (const n of publishing) if (!now.has(n)) Busy.done("pub:" + n);
+  const finished = publishing.size > 0 && now.size < publishing.size;
+  publishing.clear();
+  for (const n of now) publishing.add(n);
+  if (publishing.size) followSoon();
+  return finished;
+}
+
+function followSoon(ms = 1500) {
+  if (followTimer) return;
+  followTimer = setTimeout(async () => {
+    followTimer = null;
+    try {
+      if (trackPublishing((await api("/api/publish")).queue)) refresh();
+    } catch { if (publishing.size) followSoon(); }
+  }, ms);
+}
 
 async function refresh() {
   try {
@@ -717,8 +744,9 @@ const postDialog = (() => {
     $("postCancel").disabled = true;
     $("postStatus").className = "hint";
     $("postStatus").textContent = "Publicando… (subiendo el video, puede tardar un poco)";
+    followSoon(800);
     try {
-      show(await api(`/api/publish/queue/${enc(item.name)}/now`, { method: "POST", json: choice }));
+      show(await Busy.track("post", api(`/api/publish/queue/${enc(item.name)}/now`, { method: "POST", json: choice }), "Publicando " + item.title));
       close();
     } catch (e) {
       $("postCancel").disabled = false;

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -451,5 +452,27 @@ func TestYouTubeHint(t *testing.T) {
 	body := []byte(`{"error":{"code":401,"message":"Unauthorized","errors":[{"message":"Unauthorized","domain":"youtube.header","reason": "youtubeSignupRequired"}]}}`)
 	if err := apiError(401, body); !strings.Contains(err.Error(), "no tiene canal") {
 		t.Errorf("%v", err)
+	}
+}
+
+// The upload reports how much of the video went up, up to all of it.
+func TestUploadProgress(t *testing.T) {
+	dir, _, _ := pubFixture(t)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(string) string { return "x" }
+	acc.ep = platformEndpoints{YouTubeAPI: fake.URL, TikTokAPI: fake.URL}
+	acc.tokens["youtube"] = &oauthToken{Access: "youtube-access-0", Refresh: "r", Expiry: time.Now().Add(time.Hour)}
+	up := &platformUploader{acc: acc, poll: time.Millisecond, wait: time.Second}
+
+	var seen []float64
+	ctx := withProgress(context.Background(), func(f float64) { seen = append(seen, f) })
+	if _, err := up.Upload(ctx, filepath.Join(dir, "b viejo.mp4"), PubItem{Title: "x"}, PublishSettings{Platforms: []string{"youtube"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) == 0 || seen[len(seen)-1] != 1 || !slices.IsSorted(seen) {
+		t.Errorf("progress %v", seen)
 	}
 }

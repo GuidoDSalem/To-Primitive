@@ -139,6 +139,8 @@ function renderStats(visible) {
   if (!p) return;
   const similarity = ((1 - state.score) * 100).toFixed(2);
   const status = state.running ? "Generando…" : p.paused ? "Pausado" : "Listo";
+  if (state.running && !state.video) Busy.set("shapes", visible / p.shapes, "Formas");
+  else Busy.done("shapes");
   const rate = state.running && state.rate.value ? ` · ${state.rate.value.toFixed(1)} formas/s` : "";
   $("stats").innerHTML =
     `<b>${status}</b>${rate}<br>Formas: <b>${visible}</b> / ${p.shapes}` +
@@ -500,7 +502,7 @@ function showJob(j) {
   const running = j?.state === "running";
   $("compute").hidden = running;
   $("cancelCompute").hidden = !running;
-  $("progress").hidden = !j;
+  $("progress").hidden = !j || !["running", "done"].includes(j.state); // a stopped one isn't processing
   $("exportAnimSection").hidden = j?.state !== "done";
   if (!j) {
     $("computeStatus").textContent = "";

@@ -19,7 +19,7 @@ func (p *publisher) Discard(name string) error {
 	if err != nil {
 		return err
 	}
-	if p.busy[name] {
+	if _, busy := p.busy[name]; busy {
 		return errors.New("se está publicando ahora")
 	}
 	dir := filepath.Join(p.dir, discardedDir)

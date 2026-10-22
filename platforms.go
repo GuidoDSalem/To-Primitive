@@ -413,20 +413,25 @@ func (u *platformUploader) Upload(ctx context.Context, path string, item PubItem
 			done = map[string]uploadResult{}
 		}
 	}
-	var parts, failed []string
+	var parts, failed, todo []string
 	for _, p := range s.Platforms {
 		again := s.Choice != nil && slices.Contains(s.Choice.Again, p)
 		if r, ok := done[p]; ok && !again {
 			parts = append(parts, describeUpload(p, r))
 			continue
 		}
+		todo = append(todo, p)
+	}
+	for k, p := range todo {
+		// Each platform is its share of the progress.
+		share := withProgress(ctx, func(f float64) { reportProgress(ctx, (float64(k)+f)/float64(len(todo))) })
 		var r uploadResult
 		var err error
 		switch p {
 		case "youtube":
-			r, err = u.youtube(ctx, path, item, s)
+			r, err = u.youtube(share, path, item, s)
 		case "tiktok":
-			r, err = u.tiktok(ctx, path, item, s)
+			r, err = u.tiktok(share, path, item, s)
 		default:
 			continue
 		}
@@ -448,6 +453,37 @@ func (u *platformUploader) Upload(ctx context.Context, path string, item PubItem
 		return "", errors.New(msg)
 	}
 	return strings.Join(parts, " · "), nil
+}
+
+// The progress of an upload travels in its context: the publisher shows it
+// in the queue while the video goes up.
+type progressKey struct{}
+
+func withProgress(ctx context.Context, report func(fraction float64)) context.Context {
+	return context.WithValue(ctx, progressKey{}, report)
+}
+
+func reportProgress(ctx context.Context, fraction float64) {
+	if report, ok := ctx.Value(progressKey{}).(func(float64)); ok {
+		report(min(max(fraction, 0), 1))
+	}
+}
+
+// countingReader reports how much of a file of size bytes went up, counting
+// from n (where this part starts).
+type countingReader struct {
+	r       io.Reader
+	ctx     context.Context
+	n, size int64
+}
+
+func (c *countingReader) Read(b []byte) (int, error) {
+	n, err := c.r.Read(b)
+	c.n += int64(n)
+	if c.size > 0 {
+		reportProgress(c.ctx, float64(c.n)/float64(c.size))
+	}
+	return n, err
 }
 
 func describeUpload(p string, r uploadResult) string {
@@ -523,7 +559,7 @@ func (u *platformUploader) youtube(ctx context.Context, path string, item PubIte
 	if res.StatusCode != 200 || session == "" {
 		return uploadResult{}, apiError(res.StatusCode, body)
 	}
-	put, _ := http.NewRequestWithContext(ctx, "PUT", session, f)
+	put, _ := http.NewRequestWithContext(ctx, "PUT", session, &countingReader{r: f, ctx: ctx, size: fi.Size()})
 	put.ContentLength = fi.Size()
 	put.Header.Set("Authorization", "Bearer "+access)
 	put.Header.Set("Content-Type", "video/mp4")
@@ -714,7 +750,8 @@ func (u *platformUploader) tiktok(ctx context.Context, path string, item PubItem
 		if i == count-1 {
 			end = size - 1 // the last one takes the rest
 		}
-		req, _ := http.NewRequestWithContext(ctx, "PUT", init.UploadURL, io.NewSectionReader(f, start, end-start+1))
+		part := &countingReader{r: io.NewSectionReader(f, start, end-start+1), ctx: ctx, n: start, size: size}
+		req, _ := http.NewRequestWithContext(ctx, "PUT", init.UploadURL, part)
 		req.ContentLength = end - start + 1
 		req.Header.Set("Content-Type", "video/mp4")
 		req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
