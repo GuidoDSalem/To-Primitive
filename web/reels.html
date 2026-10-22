@@ -267,12 +267,54 @@
       </section>
 
       <section>
-        <h2>10 · Exportar</h2>
+        <h2>10 · Escena final de marca</h2>
+        <div id="outroKind" class="chips">
+          <button data-value="none" class="on">Ninguna</button>
+          <button data-value="cta">Frase (CTA)</button>
+          <button data-value="logo">Logo</button>
+          <button data-value="handle">@cuenta</button>
+        </div>
+        <p class="hint">Una escena corta después del template, en cualquiera de ellos. Se guarda con el reel y con los presets.</p>
+        <div id="outroBox" hidden>
+          <div class="field" style="margin-top:10px">
+            <label for="outroSeconds">Duración <output id="outroSecondsOut"></output></label>
+            <input id="outroSeconds" type="range" min="1" max="6" step="0.5" value="2.5">
+          </div>
+          <div id="outroCtaBox" class="field">
+            <label for="outroText">Frase</label>
+            <input id="outroText" type="text" placeholder="Seguime para ver más">
+            <p class="hint">Vacía: "Seguime para ver más" en el idioma de cada reel.</p>
+          </div>
+          <div id="outroHandleBox" class="field">
+            <label for="outroHandle">Cuenta</label>
+            <input id="outroHandle" type="text" placeholder="@tucuenta">
+            <p class="hint">Vacía: la marca de la sección Frases.</p>
+          </div>
+          <div id="outroLogoBox">
+            <label class="button wide">
+              <input id="outroLogoFile" type="file" accept="image/*" hidden>
+              Elegir logo…
+            </label>
+            <div class="field" style="margin-top:10px">
+              <label for="outroBg">Fondo</label>
+              <input id="outroBg" type="color" value="#111111">
+            </div>
+            <div class="field">
+              <label for="outroLogoShapes">Formas del logo <output id="outroLogoShapesOut"></output></label>
+              <input id="outroLogoShapes" type="range" min="30" max="400" step="10" value="150">
+            </div>
+            <p id="outroLogoStatus" class="hint">El logo se arma con formas, como los reels (con el tipo de forma de la sección Formas).</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>11 · Exportar</h2>
         <button id="export" class="wide primary">Exportar reel (MP4 1080×1920)</button>
         <progress id="expProgress" max="1" value="0" hidden></progress>
         <p id="expStatus" class="hint">Se descarga y queda en la biblioteca, con el registro de template, duración y ajustes.</p>
         <button id="savePreset" class="wide" type="button">Guardar como preset…</button>
-        <p class="hint">Guarda los ajustes actuales (formas, animación, duración, original al final, frases, marca y canción) como un preset del template elegido, para usarlos con otras fotos o videos.</p>
+        <p class="hint">Guarda los ajustes actuales (formas, animación, duración, original al final, frases, marca, canción y escena final) como un preset del template elegido, para usarlos con otras fotos o videos.</p>
       </section>
     </fieldset>
 

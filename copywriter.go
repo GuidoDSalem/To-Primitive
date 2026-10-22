@@ -139,12 +139,14 @@ func titleFromName(name string) string {
 // web/templates.js), by role, for the copywriter to translate. "title" and
 // "closing" are written fresh (hook and closing) and aren't listed.
 var templateTexts = map[string]map[string]string{
-	"levels":  {"question": "¿En qué nivel la adivinaste?", "level": "Nivel {nivel} · {formas} formas", "closing": "Comentá en qué nivel la adivinaste 👇"},
-	"compare": {"topLabel": "Original", "bottomLabel": "{formas} {tipo}"},
-	"curtain": {"question": "¿Se nota la diferencia?"},
-	"mosaic":  {"question": "¿Cuántas formas hacen falta?", "closing": "¿Con cuál la reconociste? 👇"},
-	"prefer":  {"question": "¿Cuál te gusta más?", "closing": "Comentá 1, 2, 3 o 4 👇"},
-	"counter": {"counter": "{n} {tipo}"},
+	"levels":       {"question": "¿En qué nivel la adivinaste?", "level": "Nivel {nivel} · {formas} formas", "closing": "Comentá en qué nivel la adivinaste 👇"},
+	"compare":      {"topLabel": "Original", "bottomLabel": "{formas} {tipo}"},
+	"curtain":      {"question": "¿Se nota la diferencia?"},
+	"mosaic":       {"question": "¿Cuántas formas hacen falta?", "closing": "¿Con cuál la reconociste? 👇"},
+	"prefer":       {"question": "¿Cuál te gusta más?", "closing": "Comentá 1, 2, 3 o 4 👇"},
+	"counter":      {"counter": "{n} {tipo}"},
+	"countCurtain": {"counter": "{n} {tipo}", "question": "¿Se nota la diferencia?"},
+	"countVideo":   {"counter": "{n} {tipo}"},
 }
 
 // ---------- prompt and schema (shared by the models) ----------

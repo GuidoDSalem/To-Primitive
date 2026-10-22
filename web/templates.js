@@ -115,6 +115,34 @@ const Templates = (() => {
       },
       make: makePrefer,
     },
+    countCurtain: {
+      name: "Contador y cortina", kinds: ["image", "video"], aspect: 9 / 16,
+      desc: "Las formas se suman con un contador; cuando está completa, una cortina la compara con el original.",
+      base: {
+        duration: 14, shapes: 300, mode: 1, build: { ...BUILD, curve: "inOutCubic" },
+        phrases: [
+          phrase("counter", "{n} {tipo}", 0, 0.48, "top", "counter"),
+          phrase("question", "¿Se nota la diferencia?", 0.52, 0.86, "top", "question"),
+          closing(0.88, 1),
+        ],
+      },
+      make: makeCountCurtain,
+    },
+    countVideo: {
+      name: "Contador y video", kinds: ["video"], aspect: 9 / 16,
+      desc: "Un contador arma el primer cuadro con formas; cuando está completo, el video arranca con las formas en movimiento.",
+      base: {
+        duration: 15, shapes: 150, mode: 1, build: { ...BUILD, curve: "inOutCubic" }, ending: 2,
+        phrases: [phrase("counter", "{n} {tipo}", 0, 0.3, "top", "counter"), title(0.33, 0.7, { extend: true }), closing(0.76, 1)],
+      },
+      make: makeCountVideo, ending: true, // ends showing the original (how long: src.ending)
+    },
+    cover: {
+      name: "Tapado", kinds: ["image", "video"], aspect: 9 / 16,
+      desc: "Empieza con el original y las formas lo van tapando hasta que solo quedan ellas.",
+      base: { duration: 12, shapes: 200, mode: 1, build: BUILD, phrases: [title(0.01, 0.7, { extend: true }), closing(0.76, 1)] },
+      make: makeCover,
+    },
   };
   const auto = (kind) => (kind === "video" ? "shapes" : "reveal");
 
@@ -341,53 +369,129 @@ const Templates = (() => {
       paint(ctx, t, w, h) {
         if (src.kind === "image") drawShapes(ctx, src.image, w, h, Infinity);
         else Motion.render(ctx, src.anim, t, interp, w, h);
-        const x = Math.round(w * pos(t));
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.beginPath();
-        ctx.rect(0, 0, x, h);
-        ctx.clip();
-        src.paintOriginal(ctx, 0, 0, w, h);
-        ctx.restore();
-        // The line and its handle.
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.shadowColor = "rgba(0,0,0,0.5)";
-        ctx.shadowBlur = w * 0.01;
-        ctx.fillStyle = "#fff";
-        const lw = Math.max(2, w * 0.006);
-        ctx.fillRect(x - lw / 2, 0, lw, h);
-        const r = w * 0.045;
-        ctx.beginPath();
-        ctx.arc(x, h * 0.5, r, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.shadowColor = "transparent";
-        ctx.fillStyle = "#222";
-        for (const dir of [-1, 1]) {
-          ctx.beginPath();
-          ctx.moveTo(x + dir * r * 0.65, h * 0.5);
-          ctx.lineTo(x + dir * r * 0.2, h * 0.5 - r * 0.35);
-          ctx.lineTo(x + dir * r * 0.2, h * 0.5 + r * 0.35);
-          ctx.fill();
-        }
-        ctx.restore();
+        drawCurtain(ctx, src, Math.round(w * pos(t)), w, h, 1);
       },
     };
   }
 
-  // The shapes add up with a counter ({n}); at the end, the photo.
-  function makeCounter(src, b) {
-    const D = src.duration;
-    const [F, X] = finale(src, D, 0.86 * D, clamp(0.08 * D, 0.5, 1.2));
-    const B = Math.min(0.7 * D, 0.8 * F); // counted up before the original comes
-    const opts = {
-      direction: "build", order: b.order, curve: b.curve, effect: b.effect,
-      effectTime: Math.min(b.effectTime, B * 0.3), duration: B, holdStart: 0.3, holdEnd: D,
+  // The original on the left of x, over what's drawn; the line and its
+  // handle (with opacity a).
+  function drawCurtain(ctx, src, x, w, h, a) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.beginPath();
+    ctx.rect(0, 0, x, h);
+    ctx.clip();
+    src.paintOriginal(ctx, 0, 0, w, h);
+    ctx.restore();
+    // The line and its handle.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = a;
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = w * 0.01;
+    ctx.fillStyle = "#fff";
+    const lw = Math.max(2, w * 0.006);
+    ctx.fillRect(x - lw / 2, 0, lw, h);
+    const r = w * 0.045;
+    ctx.beginPath();
+    ctx.arc(x, h * 0.5, r, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = "#222";
+    for (const dir of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(x + dir * r * 0.65, h * 0.5);
+      ctx.lineTo(x + dir * r * 0.2, h * 0.5 - r * 0.35);
+      ctx.lineTo(x + dir * r * 0.2, h * 0.5 + r * 0.35);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Counter first (a video: its first frame); once it's complete, the
+  // curtain compares it with the original (a video plays meanwhile).
+  function makeCountCurtain(src, b, interp) {
+    const video = src.kind === "video";
+    const L = video ? src.anim.duration : 0;
+    const P = video ? clamp(0.35 * L, 3, 7) : 0.5 * src.duration; // when the curtain comes
+    const D = video ? P + L : src.duration;
+    const { plan, count } = countUp(video ? firstFrame(src.anim) : src.image, b, 0.85 * P - 0.3, D);
+    // In from the left edge, then back and forth (a sweep and a half).
+    const pos = (t) => {
+      const u = (t - P) / (D - P);
+      return smooth((t - P) / 0.8) * (0.5 - 0.42 * Math.cos(3 * Math.PI * u));
     };
-    const plan = Build.plan(src.image, opts);
+    return {
+      duration: D, videoTime: video ? (t) => (t < P ? null : t - P) : () => null, originalFrom: P,
+      vars: (t) => ({ n: count(t) }),
+      paint(ctx, t, w, h) {
+        if (t < P || !video) plan.render(ctx, t, w, h);
+        else Motion.render(ctx, src.anim, t - P, interp, w, h);
+        if (t >= P) drawCurtain(ctx, src, Math.round(w * pos(t)), w, h, smooth((t - P) / 0.4));
+      },
+    };
+  }
+
+  // A counter builds the video's first frame; once it's complete, the video
+  // starts with its shapes moving. At the end, the original.
+  function makeCountVideo(src, b, interp) {
+    const L = src.anim.duration, P = clamp(0.35 * L, 3, 7), D = P + L;
+    const fade = clamp(0.2 * L, 0.5, 2);
+    const [F, X] = finale(src, D, D - fade, fade);
+    const { plan, count } = countUp(firstFrame(src.anim), b, 0.85 * P - 0.3, D);
+    return {
+      duration: D, videoTime: (t) => (t < P ? null : t - P), originalFrom: Math.max(F, P),
+      vars: (t) => ({ n: count(t) }),
+      paint(ctx, t, w, h) {
+        if (t < P) plan.render(ctx, t, w, h);
+        else Motion.render(ctx, src.anim, t - P, interp, w, h);
+        if (t >= P) overlay(ctx, smooth((t - F) / X), () => src.paintOriginal(ctx, 0, 0, w, h));
+      },
+    };
+  }
+
+  // The original first; the shapes cover it one by one while it fades under
+  // them, until only the shapes are left.
+  function makeCover(src, b, interp) {
+    const D = lengthOf(src), B = 0.75 * D, start = 0.4;
+    const img = src.kind === "image" ? src.image : null;
+    const plan = img && Build.plan(img, {
+      direction: "build", order: b.order, curve: b.curve, effect: b.effect,
+      effectTime: Math.min(b.effectTime, B * 0.3), duration: B, holdStart: start, holdEnd: D,
+    });
+    const ease = Build.CURVES[b.curve]?.f ?? ((p) => p); // a video: how many shapes are in
+    const n = shapeCount(src);
+    // The original fades under the shapes over the second part of the build.
+    const veil = (t) => smooth((t - start - 0.3 * B) / (0.7 * B));
+    return {
+      duration: D, videoTime: src.kind === "video" ? (t) => t : () => null, originalFrom: 0,
+      paint(ctx, t, w, h) {
+        src.paintOriginal(ctx, 0, 0, w, h);
+        const bg = img ? img.background : src.anim.background;
+        overlay(ctx, veil(t), () => {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.fillStyle = bg;
+          ctx.fillRect(0, 0, w, h);
+        });
+        if (img) plan.render(ctx, t, w, h, false);
+        else Motion.render(ctx, src.anim, t, interp, w, h, Math.round(n * ease(clamp((t - start) / B, 0, 1))), false);
+      },
+    };
+  }
+
+  // The shapes of img built in B seconds (after a short hold) and, for a
+  // counter, how many are in at t.
+  function countUp(img, b, B, D) {
+    const opts = {
+      direction: "build", order: b.order, effect: b.effect, effectTime: Math.min(b.effectTime, B * 0.3), duration: B, holdStart: 0.3, holdEnd: D,
+      // A video's frame has no scores to build "by impact" with.
+      curve: b.curve === "impact" && !img.scores ? "inOutCubic" : b.curve,
+    };
+    const plan = Build.plan(img, opts);
     // When each shape starts, sorted, to count the ones already in.
-    const sch = Build.schedule(src.image, opts, opts.effect === "none" ? 0 : opts.effectTime);
-    const starts = src.image.shapes.map((_, i) => sch.startOf(i)).sort((a, c) => a - c);
+    const sch = Build.schedule(img, opts, opts.effect === "none" ? 0 : opts.effectTime);
+    const starts = img.shapes.map((_, i) => sch.startOf(i)).sort((a, c) => a - c);
     const count = (t) => {
       const bt = sch.buildTime(t);
       if (bt <= 0) return 0;
@@ -395,6 +499,18 @@ const Templates = (() => {
       while (lo < hi) { const m = (lo + hi) >> 1; if (starts[m] <= bt) lo = m + 1; else hi = m; }
       return lo;
     };
+    return { plan, count };
+  }
+
+  // A video's first keyframe as a photo's shapes.
+  const firstFrame = (anim) => ({ width: anim.width, height: anim.height, background: anim.background, shapes: anim.keyframes[0] ?? [] });
+
+  // The shapes add up with a counter ({n}); at the end, the photo.
+  function makeCounter(src, b) {
+    const D = src.duration;
+    const [F, X] = finale(src, D, 0.86 * D, clamp(0.08 * D, 0.5, 1.2));
+    const B = Math.min(0.7 * D, 0.8 * F); // counted up before the original comes
+    const { plan, count } = countUp(src.image, b, B, D);
     return {
       duration: D, videoTime: () => null, originalFrom: F,
       vars: (t) => ({ n: count(t) }),
@@ -494,6 +610,82 @@ const Templates = (() => {
           inRect(ctx, c.x, c.y, c.w, c.h, scratch, (g, gw, gh) => plans[c.i].render(g, t, gw, gh));
           cellLabel(ctx, c, names[c.i], h, smooth((t - 0.3) / 0.5));
         }
+      },
+    };
+  }
+
+  // ---------- brand ending ----------
+
+  // A scene added after any template: a call to action, the logo built with
+  // shapes, or the account. o: { kind: "cta" | "logo" | "handle", seconds,
+  // text, handle, logo: { bg, image } }. paint(ctx, u, W, H, last) draws
+  // second u of it over the whole frame; last(ctx) draws the reel's last
+  // frame (behind the texts, and what the logo scene comes out of).
+  const CTA = { es: "Seguime para ver más", en: "Follow for more", pt: "Me segue para ver mais", it: "Seguimi per vederne altri", fr: "Abonne-toi pour en voir plus", de: "Folge mir für mehr" };
+  const OUTRO_KINDS = { none: "Ninguna", cta: "Frase (CTA)", logo: "Logo", handle: "@cuenta" };
+
+  function outro(o, lang) {
+    if (!o || !OUTRO_KINDS[o.kind] || o.kind === "none") return null;
+    const O = clamp(+o.seconds || 2.5, 0.5, 8);
+    const scratch = new Map();
+    const image = o.kind === "logo" ? o.logo?.image : null;
+    if (o.kind === "logo" && !image?.shapes?.length) return null;
+    const plan = image && Build.plan(image, {
+      direction: "build", order: "original", curve: "outCubic", effect: "pop", effectTime: Math.min(0.5, O * 0.25),
+      duration: Math.max(0.3, O * 0.6), holdStart: 0.25, holdEnd: O,
+    });
+    const text = o.kind === "cta" ? (o.text?.trim() || CTA[lang] || CTA.en) : o.kind === "handle" ? (o.handle ?? "").trim() : "";
+    return {
+      duration: O,
+      paint(ctx, u, W, H, last) {
+        const inA = smooth(u / 0.4);
+        if (plan) {
+          // The logo's own color comes over the reel, and the logo builds in the middle.
+          last(ctx);
+          overlay(ctx, inA, () => {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = image.background;
+            ctx.fillRect(0, 0, W, H);
+          });
+          const s = Math.min((W * 0.62) / image.width, (H * 0.4) / image.height);
+          const w = image.width * s, h = image.height * s;
+          ctx.save();
+          ctx.globalAlpha = inA;
+          // Only its shapes: the scene's color is its background, no square around it.
+          inRect(ctx, (W - w) / 2, H * 0.45 - h / 2, w, h, scratch, (g, gw, gh) => {
+            g.setTransform(1, 0, 0, 1, 0, 0);
+            g.clearRect(0, 0, gw, gh);
+            plan.render(g, u, gw, gh, false);
+          });
+          ctx.restore();
+          return;
+        }
+        // Texts: over the reel's last frame, darkened.
+        last(ctx);
+        overlay(ctx, 0.6 * inA, () => {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.fillStyle = "#000";
+          ctx.fillRect(0, 0, W, H);
+        });
+        if (!text) return;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = "#fff";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+        ctx.shadowBlur = H * 0.012;
+        const handle = o.kind === "handle";
+        const a = smooth((u - 0.15) / 0.45);
+        // The account pops in a little bigger; the phrase rises.
+        const pop = handle ? 1 + 0.12 * (1 - a) : 1;
+        ctx.translate(W / 2, H * 0.45);
+        ctx.scale(pop, pop);
+        block(ctx, text, {
+          x: 0, y: 0, maxWidth: W * (1 - 2 * (SAFE.right + 0.02)), size: H * (handle ? 0.06 : 0.055), weight: 900,
+          anchor: "center", maxLines: 3, alpha: a, rise: handle ? 0 : H * 0.02,
+        });
+        ctx.restore();
       },
     };
   }
@@ -616,5 +808,5 @@ const Templates = (() => {
     ctx.restore();
   }
 
-  return { LIST, SAFE, POSITIONS, STYLES, SHAPE_NAMES, words, auto, make, phrasesFor, phraseAlpha, drawTexts };
+  return { LIST, SAFE, POSITIONS, STYLES, SHAPE_NAMES, OUTRO_KINDS, CTA, words, auto, make, outro, phrasesFor, phraseAlpha, drawTexts };
 })();

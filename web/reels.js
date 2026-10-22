@@ -29,6 +29,7 @@ const reel = {
   preset: null,     // id of the preset applied (null: the template's base)
   audio: { mode: "none", file: null, url: null, bank: null }, // mode: "none" | "source" | "file"; bank: its name in the audio bank
   phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
+  outro: { kind: "none", seconds: 2.5, text: "", handle: "", logo: null }, // brand ending (Templates.outro); logo: { name, src, bg, shapes, image, version }
   touched: new Set(), // settings changed by hand: a template's base doesn't override them
   lang: "es",       // language of the texts drawn on the reel
   gen: null,        // generated shapes: { key, image } (photo) or { key, anim } (video)
@@ -158,7 +159,7 @@ const portionFactor = () => (templateId() === "loop" ? 2 : 1);
 
 // The template applied to the generated shapes, or null when there's
 // nothing (current) to show. Cached per shapes, template and duration.
-function composition(id = templateId()) {
+function composition(id = templateId(), withEnding = true) {
   const spec = Templates.LIST[id];
   if (!reel.gen || stale() || !spec.kinds.includes(reel.kind)) return null;
   // Templates with several kinds of shapes need all of them computed.
@@ -174,7 +175,36 @@ function composition(id = templateId()) {
       paintOriginal: (ctx, x, y, w, h) => paintOriginal(ctx, w, h, true, x, y),
     }));
   }
-  return cache.get(key);
+  return withEnding ? withOutro(cache.get(key)) : cache.get(key);
+}
+
+// ---------- brand ending ----------
+
+// The ending scene as set, made again only when it changes.
+const outroCache = { key: null, scene: null };
+function outroScene() {
+  const o = { ...reel.outro, handle: reel.outro.handle.trim() || $("tBrand").value.trim() };
+  const key = JSON.stringify([o.kind, o.seconds, o.text, o.handle, reel.lang, o.logo?.version ?? 0]);
+  if (outroCache.key !== key) Object.assign(outroCache, { key, scene: Templates.outro(o, reel.lang) });
+  return outroCache.scene;
+}
+
+// A template's content followed by the ending scene: main is where the
+// template ends (its phrases are timed on it), the original video stays on
+// its last frame.
+const outroComps = new WeakMap(); // scene -> WeakMap(comp -> with it)
+function withOutro(comp) {
+  const scene = outroScene();
+  if (!scene) return comp;
+  if (!outroComps.has(scene)) outroComps.set(scene, new WeakMap());
+  const made = outroComps.get(scene);
+  if (!made.has(comp)) {
+    made.set(comp, {
+      ...comp, main: comp.duration, duration: comp.duration + scene.duration, outro: scene,
+      videoTime: (t) => comp.videoTime(Math.min(t, comp.duration - 0.04)),
+    });
+  }
+  return made.get(comp);
 }
 
 // ---------- variants: the same photo with other kinds of shapes ----------
@@ -290,10 +320,14 @@ async function startVariant(mode) {
 
 // A full frame of the reel at time t: framed content plus texts.
 function renderReel(ctx, comp, t, W, H, bufs) {
+  if (comp.outro && t >= comp.main) {
+    comp.outro.paint(ctx, t - comp.main, W, H, (c) => renderReel(c, comp, comp.main - 1e-3, W, H, bufs));
+    return;
+  }
   drawFramed(ctx, W, H, (c, w, h) => comp.paint(c, t, w, h), bufs);
   // Another template (a card) shows with its own phrases, carrying the texts.
   const phrases = comp.id === templateId() ? reel.phrases : Templates.phrasesFor(comp.id, reel.phrases);
-  Templates.drawTexts(ctx, W, H, t, comp.duration, phrases, { ...textVars(), ...comp.vars?.(t) }, $("tBrand").value);
+  Templates.drawTexts(ctx, W, H, t, comp.main ?? comp.duration, phrases, { ...textVars(), ...comp.vars?.(t) }, $("tBrand").value);
 }
 
 // ---------- shape parameters (as in the editor) ----------
@@ -847,7 +881,7 @@ const cards = (() => {
   const resolved = (c) => (c.id === "auto" ? Templates.auto(reel.kind) : c.id);
 
   function drawCard(c, now) {
-    const comp = composition(resolved(c));
+    const comp = composition(resolved(c), false); // the cards show the templates, without the ending
     const { ctx, canvas } = c;
     if (comp) {
       renderReel(ctx, comp, (now / 1000) % comp.duration, canvas.width, canvas.height, c.bufs);
@@ -1431,10 +1465,12 @@ function refreshUI() {
     $("ending").max = Math.max(1, Math.floor(length * 0.85 * 2) / 2);
     const fromBase = !reel.touched.has("ending");
     $("endingAuto").checked = fromBase;
-    const shown = reel.ending ?? (comp && Number.isFinite(comp.originalFrom) ? comp.duration - comp.originalFrom : null);
+    const shown = reel.ending ?? (comp && Number.isFinite(comp.originalFrom) ? (comp.main ?? comp.duration) - comp.originalFrom : null);
     if (shown != null) $("ending").value = Math.round(shown * 2) / 2;
     $("endingOut").textContent = shown == null ? "" : (shown <= 0 ? "0 s · sin original" : `${(+shown).toFixed(1)} s`) + (fromBase ? " (base del template)" : "");
   }
+
+  drawOutroUI();
 
   // Audio and export.
   const canSource = !!reel.video?.info.hasAudio;
@@ -1585,6 +1621,165 @@ async function useBankAudio(name) {
 $("bankSearch").addEventListener("input", drawBank);
 loadBank();
 
+// ---------- brand ending: controls ----------
+
+let logoVersion = 0;
+const OUTRO_HINT = "El logo se arma con formas, como los reels (con el tipo de forma de la sección Formas).";
+
+// As saved with the reel and its presets: the logo goes with its picture
+// (small) and its shapes, so it's drawn again without computing anything.
+function outroRecord() {
+  const o = reel.outro, l = o.logo;
+  return { kind: o.kind, seconds: o.seconds, text: o.text, handle: o.handle, logo: l?.image ? { name: l.name, src: l.src, bg: l.bg, shapes: l.shapes, image: l.image } : null };
+}
+
+function setOutro(m) {
+  const o = { kind: "none", seconds: 2.5, text: "", handle: "", logo: null, ...(m ?? {}) };
+  if (o.logo) o.logo = { ...o.logo, version: ++logoVersion };
+  reel.outro = o;
+  $("outroSeconds").value = o.seconds;
+  $("outroText").value = o.text;
+  $("outroHandle").value = o.handle;
+  if (o.logo) {
+    $("outroBg").value = o.logo.bg;
+    $("outroLogoShapes").value = o.logo.shapes;
+  }
+  $("outroLogoStatus").textContent = o.logo?.image ? `Logo: ${o.logo.name} (${o.logo.image.shapes.length} formas).` : OUTRO_HINT;
+}
+
+function drawOutroUI() {
+  const o = reel.outro;
+  for (const b of $("outroKind").children) b.classList.toggle("on", b.dataset.value === o.kind);
+  $("outroBox").hidden = o.kind === "none";
+  $("outroCtaBox").hidden = o.kind !== "cta";
+  $("outroHandleBox").hidden = o.kind !== "handle";
+  $("outroLogoBox").hidden = o.kind !== "logo";
+  $("outroSecondsOut").textContent = (+o.seconds).toFixed(1) + " s";
+  $("outroLogoShapesOut").textContent = $("outroLogoShapes").value;
+  $("outroHandle").placeholder = $("tBrand").value.trim() || "@tucuenta";
+}
+
+const outroChanged = () => {
+  refreshUI();
+  player.seek(player.time);
+};
+$("outroKind").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  reel.outro.kind = b.dataset.value;
+  outroChanged();
+});
+$("outroSeconds").addEventListener("input", () => { reel.outro.seconds = +$("outroSeconds").value; outroChanged(); });
+$("outroText").addEventListener("input", () => { reel.outro.text = $("outroText").value; outroChanged(); });
+$("outroHandle").addEventListener("input", () => { reel.outro.handle = $("outroHandle").value; outroChanged(); });
+$("outroLogoShapes").addEventListener("input", drawOutroUI);
+
+const loadImage = (url) => new Promise((resolve, reject) => {
+  const im = new Image();
+  im.onload = () => resolve(im);
+  im.onerror = () => reject(new Error("no es una imagen que se pueda abrir"));
+  im.src = url;
+});
+
+$("outroLogoFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    // Kept small (with its transparency) to go with the reel and its presets.
+    const url = URL.createObjectURL(f);
+    const im = await loadImage(url);
+    URL.revokeObjectURL(url);
+    const s = Math.min(1, 384 / Math.max(im.naturalWidth, im.naturalHeight));
+    const cv = document.createElement("canvas");
+    cv.width = Math.max(1, Math.round(im.naturalWidth * s));
+    cv.height = Math.max(1, Math.round(im.naturalHeight * s));
+    cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
+    reel.outro.logo = { name: f.name, src: cv.toDataURL("image/png"), bg: $("outroBg").value, shapes: +$("outroLogoShapes").value, image: null, version: ++logoVersion };
+    reel.outro.kind = "logo";
+    computeLogo();
+  } catch (err) {
+    $("outroLogoStatus").textContent = "No se pudo usar el logo: " + err.message;
+  }
+});
+for (const id of ["outroBg", "outroLogoShapes"]) {
+  $(id).addEventListener("change", () => {
+    const l = reel.outro.logo;
+    if (!l?.src) return;
+    Object.assign(l, { bg: $("outroBg").value, shapes: +$("outroLogoShapes").value });
+    computeLogo();
+  });
+}
+
+// The logo's shapes, computed like a photo's (over the chosen background,
+// which fills its transparent parts).
+let logoJob = 0;
+async function computeLogo() {
+  const l = reel.outro.logo, job = ++logoJob;
+  const status = (text) => { if (job === logoJob) $("outroLogoStatus").textContent = text; };
+  status("Armando el logo con formas…");
+  refreshUI();
+  let es = null, id = null, p = null;
+  try {
+    const im = await loadImage(l.src);
+    const cv = document.createElement("canvas");
+    cv.width = im.naturalWidth;
+    cv.height = im.naturalHeight;
+    const g = cv.getContext("2d");
+    g.fillStyle = l.bg;
+    g.fillRect(0, 0, cv.width, cv.height);
+    g.drawImage(im, 0, 0);
+    const form = new FormData();
+    form.append("image", await new Promise((r) => cv.toBlob(r, "image/png")), "logo.png");
+    p = { ...params(), shapes: l.shapes, background: l.bg };
+    form.append("params", JSON.stringify(p));
+    id = (await api("/api/sessions", { method: "POST", body: form })).id;
+    const image = await new Promise((resolve, reject) => {
+      let img = null, gen = null, count = 0, running = true;
+      es = new EventSource(`/api/sessions/${id}/events`);
+      const check = () => {
+        if (job !== logoJob) return reject(new Error("reemplazado"));
+        Busy.set("logo", Math.min(1, count / p.shapes), "Logo");
+        status(`Armando el logo con formas: ${Math.min(count, p.shapes)} / ${p.shapes}`);
+        if (img && !running && count >= p.shapes) resolve({ ...img, shapes: img.shapes.slice(0, p.shapes), scores: img.scores.slice(0, p.shapes) });
+      };
+      es.addEventListener("snapshot", (e) => {
+        const s = JSON.parse(e.data);
+        gen = s.g;
+        img = { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore, shapes: s.data.slice(), scores: s.scores.slice() };
+        count = s.data.length;
+        running = s.running;
+        check();
+      });
+      es.addEventListener("shape", (e) => {
+        const s = JSON.parse(e.data);
+        if (s.g !== gen || !img) return;
+        img.shapes[s.i] = s.data;
+        img.scores[s.i] = s.score;
+        count = Math.max(count, s.i + 1);
+        check();
+      });
+      es.addEventListener("status", (e) => {
+        const s = JSON.parse(e.data);
+        if (s.g !== gen) return;
+        count = s.count;
+        running = s.running;
+        check();
+      });
+    });
+    if (job !== logoJob) return;
+    Object.assign(l, { image, version: ++logoVersion });
+    status(`Logo: ${l.name} (${image.shapes.length} formas).`);
+  } catch (err) {
+    if (err.message !== "reemplazado") status("No se pudo armar el logo: " + err.message);
+  } finally {
+    es?.close();
+    if (id) api(`/api/sessions/${id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...p, paused: true }) }).catch(() => {});
+    if (job === logoJob) Busy.done("logo");
+  }
+  outroChanged();
+}
+
 // ---------- export ----------
 
 let exporting = null; // AbortController while exporting
@@ -1606,6 +1801,7 @@ function reelMeta(comp, res, seconds) {
     phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
     brand: $("tBrand").value,
     audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, bank: a.mode === "file" ? a.bank : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+    outro: outroRecord(),
     export: { width: res.width, height: res.height, fps: 30, codec: res.codec, seconds: Math.round(seconds * 10) / 10 },
   };
 }
@@ -1874,6 +2070,7 @@ function restoreRecord(m) {
   reel.touched = new Set([...(m.changedByHand || []), "duration", "shapes", "mode", "build", "phrases"]);
   // A time for the original other than the template's base: chosen by hand.
   if (m.ending != null && m.ending !== (Templates.LIST[templateId()]?.base.ending ?? null)) reel.touched.add("ending");
+  setOutro(m.outro);
   return restoreSong(m.audio);
 }
 
@@ -2150,6 +2347,7 @@ function presetSettings() {
     phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
     brand: $("tBrand").value,
     audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, bank: a.mode === "file" ? a.bank : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+    outro: outroRecord(),
   };
 }
 

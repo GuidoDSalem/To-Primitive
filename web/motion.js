@@ -122,11 +122,13 @@ const Motion = (() => {
   }
 
   // Draw the animation at time t (seconds) filling a w x h canvas (only the
-  // first `limit` shapes, if given).
-  function render(ctx, anim, t, mode, w, h, limit) {
+  // first `limit` shapes, if given; background: false, only the shapes).
+  function render(ctx, anim, t, mode, w, h, limit, background = true) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = anim.background;
-    ctx.fillRect(0, 0, w, h);
+    if (background) {
+      ctx.fillStyle = anim.background;
+      ctx.fillRect(0, 0, w, h);
+    }
     const sx = w / anim.width, sy = h / anim.height;
     // Same half-pixel offset primitive uses when drawing.
     ctx.setTransform(sx, 0, 0, sy, 0.5 * sx, 0.5 * sy);

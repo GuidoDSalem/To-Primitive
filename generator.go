@@ -36,13 +36,14 @@ var imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".web
 // Templates per kind of source (as in web/templates.js), in the order the
 // versions are made.
 var autoTemplates = map[string][]string{
-	"image": {"reveal", "levels", "compare", "curtain", "counter", "loop", "mosaic", "prefer"},
-	"video": {"shapes", "levels", "compare", "curtain", "loop", "mosaic"},
+	"image": {"reveal", "levels", "compare", "curtain", "counter", "loop", "mosaic", "prefer", "countCurtain", "cover"},
+	"video": {"shapes", "levels", "compare", "curtain", "loop", "mosaic", "countCurtain", "countVideo", "cover"},
 }
 
 var templateNames = map[string]string{
 	"reveal": "Revelado", "loop": "Loop hipnótico", "shapes": "Video en formas", "levels": "En qué nivel",
 	"compare": "Comparativa", "curtain": "Cortina", "counter": "Contador", "mosaic": "Mosaico de niveles", "prefer": "Cuál preferís",
+	"countCurtain": "Contador y cortina", "countVideo": "Contador y video", "cover": "Tapado",
 }
 
 const (
@@ -488,7 +489,8 @@ func (g *generator) ensureCopy(ctx context.Context, j *GenJob) {
 }
 
 // Shapes in each template's base (as in web/templates.js), for the copy.
-var templateShapes = map[string]int{"reveal": 150, "loop": 150, "shapes": 150, "levels": 150, "compare": 200, "curtain": 200, "counter": 300, "mosaic": 500, "prefer": 150}
+var templateShapes = map[string]int{"reveal": 150, "loop": 150, "shapes": 150, "levels": 150, "compare": 200, "curtain": 200, "counter": 300, "mosaic": 500, "prefer": 150,
+	"countCurtain": 300, "countVideo": 150, "cover": 200}
 
 // sourceFrame is a JPEG of the source (the middle of a video) for the
 // model to see; nil if it can't be made.

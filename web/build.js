@@ -171,10 +171,13 @@ const Build = (() => {
     const effectTime = opts.effect === "none" ? 0 : Math.min(opts.effectTime, opts.duration * 0.9);
     const { geometry: geo, startOf, ease, total, buildTime } = schedule(img, opts, effectTime);
 
-    function render(ctx, t, w, h) {
+    // background: false draws only the shapes, over what's already there.
+    function render(ctx, t, w, h, background = true) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = img.background;
-      ctx.fillRect(0, 0, w, h);
+      if (background) {
+        ctx.fillStyle = img.background;
+        ctx.fillRect(0, 0, w, h);
+      }
       const sx = w / img.width, sy = h / img.height;
       const bt = buildTime(t);
       for (let i = 0; i < n; i++) {
