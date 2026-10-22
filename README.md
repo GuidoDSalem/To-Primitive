@@ -186,6 +186,8 @@ Próximas etapas: una cola de publicación con una regla configurable (por ejemp
 
 
 
+**Presets.** Cada template puede tener presets guardados: ajustes con nombre (formas, tipo, animación, duración, original al final, frases, marca y canción) para usar con cualquier foto o video. En la sección Template aparece "Presets de <template>": **Base** (la configuración base) y los guardados; un clic aplica uno y la × lo borra. Al terminar de editar, **Guardar como preset…** (en Exportar) guarda el estado actual como preset del template elegido; con un nombre que ya existe en ese template, lo reemplaza. No guardan lo que depende de la fuente (encuadre, tramo del video, frames de prueba). Se guardan en la carpeta de la biblioteca (`.presets.json`; la canción, en `sources/`).
+
 **Original al final.** En los templates que terminan mostrando la foto o el video original (Revelado, Video en formas, ¿En qué nivel?, Contador y Mosaico), en la sección Duración se elige cuántos segundos antes del final empieza a aparecer el original; en 0 no se muestra (las formas siguen hasta el final). Cada template trae su valor en la configuración base (Revelado 5,5 s, ¿En qué nivel? 3 s, Video en formas, Contador y Mosaico 2 s), que es el que usa el generador; cambiarlo a mano lo mantiene al cambiar de template, y "Usar el de la configuración base" vuelve al del template. Lo anterior (armado de formas, niveles, contador) se acomoda para terminar antes. Se guarda con el reel (`ending` en su registro).
 
 ## Generar reels automáticamente
@@ -406,6 +408,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/reels` | Lista la biblioteca, del más nuevo al más viejo |
 | `GET /api/reels/{id}/video` | El MP4 de un reel (`?download=1` para descargarlo) |
 | `DELETE /api/reels/{id}` | Borra un reel de la biblioteca (y su origen, si ningún otro reel lo usa) |
+| `GET /api/presets` · `POST /api/presets` · `DELETE /api/presets/{id}` | Presets de los templates: listar, guardar (`template`, `name`, `settings` en JSON y, opcional, la canción en `audio`) y borrar |
 | `GET /api/reels/files/{hash}/{name}` | Un archivo guardado para reabrir reels (origen o canción; su ruta está en el registro, p. ej. `audio.kept`) |
 | `GET /api/reels/{id}/spec` · `GET …/source` | Ajustes y origen, para reabrirlo en el editor (`reels.html?lib=`) |
 | `POST /api/reels/{id}/queue` | Copia un reel de la biblioteca a la carpeta de publicación (con título y descripción) |

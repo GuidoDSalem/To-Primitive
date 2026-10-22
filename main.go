@@ -55,6 +55,7 @@ type server struct {
 	pub     *publisher // nil: publishing not configured
 	gen     *generator // nil: automatic generation not configured
 	acc     *accounts  // connected YouTube / TikTok accounts
+	presets *presetStore
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -112,7 +113,7 @@ func main() {
 }
 
 func newServer(dataDir, reelsDir string) *server {
-	return &server{dataDir: dataDir, lib: &library{dir: reelsDir},
+	return &server{dataDir: dataDir, lib: &library{dir: reelsDir}, presets: newPresetStore(filepath.Join(reelsDir, ".presets.json")),
 		sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
 }
 
@@ -156,6 +157,9 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/reels/{id}/spec", srv.reelSpec)
 	mux.HandleFunc("GET /api/reels/{id}/source", srv.reelSource)
 	mux.HandleFunc("GET /api/reels/files/{hash}/{name}", srv.reelFile)
+	mux.HandleFunc("GET /api/presets", srv.presetList)
+	mux.HandleFunc("POST /api/presets", srv.presetAdd)
+	mux.HandleFunc("DELETE /api/presets/{id}", srv.presetDelete)
 
 	mux.HandleFunc("GET /api/publish", srv.withPublisher(srv.pubOverview))
 	mux.HandleFunc("PUT /api/publish/settings", srv.withPublisher(srv.pubSettings))

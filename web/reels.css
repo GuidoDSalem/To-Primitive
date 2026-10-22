@@ -85,3 +85,6 @@ textarea, input[type=text] {
 code { font-size: 11px; color: var(--accent); }
 #testFrames { margin-top: 6px; }
 .silent-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 10px; background: #f2b45c22; border: 1px solid #f2b45c; color: #f2b45c; font-size: 11px; font-weight: 600; vertical-align: middle; }
+.field.presets > label:first-child { display: block; }
+.presets .chips button i { font-style: normal; opacity: .6; padding-left: 2px; }
+.presets .chips button i:hover { opacity: 1; color: #ff8a8a; }

@@ -26,6 +26,7 @@ const reel = {
   template: "auto",
   duration: { preset: "15", free: 20 },
   ending: null,     // seconds the original is shown at the end (0: not shown; null: the template's)
+  preset: null,     // id of the preset applied (null: the template's base)
   audio: { mode: "none", file: null, url: null }, // mode: "none" | "source" | "file"
   phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
   touched: new Set(), // settings changed by hand: a template's base doesn't override them
@@ -1361,6 +1362,7 @@ for (const id of ["kfps", "adapt", "videoFlow", "interp", "recOrder", "recCurve"
 // ---------- state shown in the panel ----------
 
 function refreshUI() {
+  if (typeof drawPresets === "function" && presetsReady) drawPresets();
   const has = !!reel.kind;
   $("controls").disabled = !has;
   $("dropHint").hidden = has;
@@ -2031,3 +2033,113 @@ async function runAuto(id) {
     await post("fail", { error: String(e?.message || e) }).catch(() => {});
   }
 }
+
+// ---------- presets: saved settings of a template ----------
+
+// A preset is a reel's record without what belongs to one source (framing,
+// portion, test frames): applied to any photo or video of the template.
+let presets = [];
+let presetsKey = null;
+var presetsReady = true;
+
+async function loadPresets() {
+  try {
+    presets = await api("/api/presets");
+  } catch {
+    presets = [];
+  }
+  presetsKey = null;
+  drawPresets();
+}
+
+function presetSettings() {
+  const a = reel.audio;
+  return {
+    v: 1, template: templateId(),
+    durationChoice: { ...reel.duration },
+    shapes: params(),
+    animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
+    ending: reel.ending,
+    changedByHand: [...reel.touched],
+    phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
+    brand: $("tBrand").value,
+    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+  };
+}
+
+async function applyPreset(p) {
+  const m = { ...JSON.parse(JSON.stringify(p.settings)), template: p.template };
+  if (m.audio?.mode === "source" && reel.kind !== "video") m.audio.mode = "none";
+  await restoreRecord(m);
+  // What wasn't changed by hand follows the next template's base, as usual.
+  reel.touched = new Set(m.changedByHand ?? []);
+  reel.preset = p.id;
+  $("presetStatus").textContent = `Preset "${p.name}" aplicado.`;
+  sendParams();
+  presetsKey = null;
+  refreshUI();
+  player.seek(0);
+}
+
+function drawPresets() {
+  const id = templateId();
+  const box = $("presetBox");
+  box.hidden = !reel.kind;
+  if (!reel.kind) return;
+  const mine = presets.filter((p) => p.template === id);
+  // A preset of another template doesn't count once the template changed.
+  const active = mine.some((p) => p.id === reel.preset) ? reel.preset : null;
+  const key = JSON.stringify([id, mine.map((p) => p.id), active]);
+  if (key === presetsKey) return;
+  presetsKey = key;
+  $("presetTpl").textContent = Templates.LIST[id]?.name ?? id;
+  const base = Object.assign(document.createElement("button"), { type: "button", textContent: "Base", title: "La configuración base del template" });
+  base.classList.toggle("on", !active);
+  base.addEventListener("click", () => {
+    reel.preset = null;
+    applyBase(true);
+    $("presetStatus").textContent = "";
+    presetsKey = null;
+    refreshUI();
+    player.seek(0);
+  });
+  $("presets").replaceChildren(base, ...mine.map((p) => {
+    const b = Object.assign(document.createElement("button"), { type: "button", title: `Aplicar "${p.name}"` });
+    b.append(p.name, Object.assign(document.createElement("i"), { textContent: "×", title: "Borrar este preset" }));
+    b.classList.toggle("on", active === p.id);
+    b.addEventListener("click", async (e) => {
+      if (e.target.tagName === "I") {
+        if (!confirm(`¿Borrar el preset "${p.name}"?`)) return;
+        await api(`/api/presets/${p.id}`, { method: "DELETE" }).catch((err) => alert(err.message));
+        if (reel.preset === p.id) reel.preset = null;
+        loadPresets();
+        return;
+      }
+      applyPreset(p).catch((err) => { $("presetStatus").textContent = "No se pudo aplicar: " + err.message; });
+    });
+    return b;
+  }));
+}
+
+$("savePreset").addEventListener("click", async () => {
+  if (!reel.kind) return;
+  const id = templateId(), tpl = Templates.LIST[id]?.name ?? id;
+  const current = presets.find((p) => p.id === reel.preset && p.template === id);
+  const name = prompt(`Nombre del preset para "${tpl}" (si ya existe, se reemplaza):`, current?.name ?? "");
+  if (!name?.trim()) return;
+  const form = new FormData();
+  form.append("template", id);
+  form.append("name", name.trim());
+  form.append("settings", JSON.stringify(presetSettings()));
+  if (reel.audio.mode === "file" && reel.audio.file) form.append("audio", reel.audio.file);
+  try {
+    const p = await api("/api/presets", { method: "POST", body: form });
+    reel.preset = p.id;
+    await loadPresets();
+    $("presetStatus").textContent = `Guardado el preset "${p.name}" de ${tpl}.`;
+  } catch (e) {
+    alert("No se pudo guardar el preset: " + e.message);
+  }
+});
+
+loadPresets();

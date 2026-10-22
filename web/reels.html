@@ -49,6 +49,11 @@
         <h2>2 · Template</h2>
         <div id="templates" class="tpl-grid"></div>
         <p id="tplInfo" class="hint"></p>
+        <div id="presetBox" class="field presets" hidden>
+          <label>Presets de <strong id="presetTpl"></strong></label>
+          <div id="presets" class="chips"></div>
+          <p id="presetStatus" class="hint"></p>
+        </div>
         <button id="restoreBase" class="wide" hidden>Volver a la configuración base del template</button>
       </section>
 
@@ -260,6 +265,8 @@
         <button id="export" class="wide primary">Exportar reel (MP4 1080×1920)</button>
         <progress id="expProgress" max="1" value="0" hidden></progress>
         <p id="expStatus" class="hint">Se descarga y queda en la biblioteca, con el registro de template, duración y ajustes.</p>
+        <button id="savePreset" class="wide" type="button">Guardar como preset…</button>
+        <p class="hint">Guarda los ajustes actuales (formas, animación, duración, original al final, frases, marca y canción) como un preset del template elegido, para usarlos con otras fotos o videos.</p>
       </section>
     </fieldset>
 
