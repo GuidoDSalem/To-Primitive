@@ -143,6 +143,49 @@ const Templates = (() => {
       base: { duration: 12, shapes: 200, mode: 1, build: BUILD, phrases: [title(0.01, 0.7, { extend: true }), closing(0.76, 1)] },
       make: makeCover,
     },
+    // Made to hold attention: something on screen from the first frame, one
+    // clear place to look at every moment, and a change of rhythm every
+    // second or two (zoom hits, flashes, numbers going up, a countdown).
+    mystery: {
+      name: "¿Qué es?", kinds: ["image", "video"], aspect: 9 / 16,
+      desc: "Arranca con un zoom extremo a un detalle y se aleja a golpes, con pistas y una barra de tiempo, hasta revelar el original.",
+      base: {
+        duration: 12, shapes: 250, mode: 1, build: BUILD, ending: 2.5,
+        phrases: [
+          phrase("question", "¿Qué es? Adiviná antes del final 👀", 0, 0.76, "top", "question"),
+          phrase("clue", "Pista {pista} de {pistas}", 0, 0.76, "foot", "label"),
+          closing(0.8, 1, "¿Lo adivinaste? 👇"),
+        ],
+      },
+      make: makeMystery, ending: true, // ends showing the original (how long: src.ending)
+    },
+    countdown: {
+      name: "3, 2, 1", kinds: ["image"], aspect: 9 / 16,
+      desc: "Cuenta regresiva a golpes: con cada número entra una ráfaga de formas, en el ¡Ya! aparece la foto, y vuelve al principio para verlo en loop.",
+      base: {
+        duration: 10, shapes: 200, mode: 1, build: BUILD,
+        phrases: [title(0, 0.5), closing(0.62, 0.93, "¿Otra vez? 🔁")],
+      },
+      make: makeCountdown,
+    },
+    similarity: {
+      name: "Similitud %", kinds: ["image"], aspect: 9 / 16,
+      desc: "Un porcentaje de parecido sube mientras se arma, con festejos en cada hito, hasta llegar al original.",
+      base: {
+        duration: 12, shapes: 300, mode: 1, build: { ...BUILD, curve: "impact" }, ending: 2,
+        phrases: [phrase("question", "¿Hasta qué % llega?", 0, 0.78, "top", "question"), closing(0.82, 1, "¿A qué % la reconociste? 👇")],
+      },
+      make: makeSimilarity, ending: true, // ends showing the original (how long: src.ending)
+    },
+    lens: {
+      name: "Lupa", kinds: ["image", "video"], aspect: 9 / 16,
+      desc: "Una lupa recorre los detalles mostrando el original debajo de las formas; al final se abre y revela todo.",
+      base: {
+        duration: 12, shapes: 200, mode: 1, build: BUILD,
+        phrases: [phrase("question", "¿Qué esconden las formas? 🔍", 0, 0.76, "top", "question"), closing(0.82, 1)],
+      },
+      make: makeLens,
+    },
   };
   const auto = (kind) => (kind === "video" ? "shapes" : "reveal");
 
@@ -151,9 +194,9 @@ const Templates = (() => {
   const SHAPE_NAMES = { 0: "formas", 1: "triángulos", 2: "rectángulos", 3: "elipses", 4: "círculos", 5: "rectángulos", 6: "curvas", 7: "elipses", 8: "polígonos" };
   // Words the templates draw themselves, per language (others fall back to English).
   const WORDS = {
-    es: { shapes: "formas", names: SHAPE_NAMES },
-    en: { shapes: "shapes", names: { 0: "shapes", 1: "triangles", 2: "rectangles", 3: "ellipses", 4: "circles", 5: "rectangles", 6: "curves", 7: "ellipses", 8: "polygons" } },
-    pt: { shapes: "formas", names: { 0: "formas", 1: "triângulos", 2: "retângulos", 3: "elipses", 4: "círculos", 5: "retângulos", 6: "curvas", 7: "elipses", 8: "polígonos" } },
+    es: { shapes: "formas", go: "¡Ya!", names: SHAPE_NAMES },
+    en: { shapes: "shapes", go: "Go!", names: { 0: "shapes", 1: "triangles", 2: "rectangles", 3: "ellipses", 4: "circles", 5: "rectangles", 6: "curves", 7: "ellipses", 8: "polygons" } },
+    pt: { shapes: "formas", go: "Já!", names: { 0: "formas", 1: "triângulos", 2: "retângulos", 3: "elipses", 4: "círculos", 5: "retângulos", 6: "curvas", 7: "elipses", 8: "polígonos" } },
   };
   const words = (lang) => WORDS[lang] ?? WORDS.en;
 
@@ -610,6 +653,253 @@ const Templates = (() => {
           inRect(ctx, c.x, c.y, c.w, c.h, scratch, (g, gw, gh) => plans[c.i].render(g, t, gw, gh));
           cellLabel(ctx, c, names[c.i], h, smooth((t - 0.3) / 0.5));
         }
+      },
+    };
+  }
+
+  // ---------- made to hold attention ----------
+
+  const backOut = (x) => { x = clamp(x, 0, 1); const c = 1.70158; return 1 + (c + 1) * (x - 1) ** 3 + c * (x - 1) ** 2; };
+  const outCubic = (x) => 1 - (1 - clamp(x, 0, 1)) ** 3;
+
+  // Where the detail is: the later (smaller) shapes, counted on a grid. Up
+  // to k points (fractions of the frame), the busiest first, apart.
+  function hotspots(img, k = 3) {
+    const C = 4, R = 6, cells = [...Array(C * R)].map(() => ({ w: 0, x: 0, y: 0 }));
+    const shapes = img.shapes;
+    for (const s of shapes.slice(Math.floor(shapes.length * 0.4))) {
+      const g = Build.geometry(s);
+      const x = clamp(g.cx / img.width, 0, 0.999), y = clamp(g.cy / img.height, 0, 0.999);
+      const c = cells[Math.floor(y * R) * C + Math.floor(x * C)], w = 1 / Math.sqrt(g.area + 1);
+      c.w += w; c.x += x * w; c.y += y * w;
+    }
+    const out = [];
+    for (const c of cells.filter((c) => c.w > 0).sort((a, b) => b.w - a.w)) {
+      const p = { x: c.x / c.w, y: c.y / c.w };
+      if (out.every((q) => Math.hypot(q.x - p.x, (q.y - p.y) * 16 / 9) > 0.35)) out.push(p);
+      if (out.length === k) break;
+    }
+    return out.length ? out : [{ x: 0.5, y: 0.45 }];
+  }
+
+  // Zoom z around (fx, fy), keeping the view inside the frame.
+  function view(fx, fy, z) {
+    const half = 0.5 / z;
+    return { cx: clamp(fx, half, 1 - half), cy: clamp(fy, half, 1 - half), z };
+  }
+
+  // The first n shapes of a photo seen through view v.
+  function shapesView(ctx, img, w, h, n, v) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = img.background;
+    ctx.fillRect(0, 0, w, h);
+    const sx = (w / img.width) * v.z, sy = (h / img.height) * v.z;
+    ctx.setTransform(sx, 0, 0, sy, w / 2 - v.cx * w * v.z + 0.5 * sx, h / 2 - v.cy * h * v.z + 0.5 * sy);
+    for (let i = 0; i < Math.min(n, img.shapes.length); i++) Motion.drawShape(ctx, img.shapes[i], 1);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  const originalView = (src, ctx, w, h, v) => src.paintOriginal(ctx, w / 2 - v.cx * w * v.z, h / 2 - v.cy * h * v.z, w * v.z, h * v.z);
+
+  // A short white flash right after `at` (soft: never more than 0.3).
+  function flash(ctx, t, at, w, h) {
+    const u = (t - at) / 0.2;
+    if (u < 0 || u > 1) return;
+    overlay(ctx, 0.3 * (1 - u), () => {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, w, h);
+    });
+  }
+
+  // Big text drawn by the template itself (numbers, stamps), scaled from
+  // its center.
+  function bigText(ctx, text, x, y, size, scale, alpha, color = "#fff") {
+    if (alpha <= 0.002) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = alpha;
+    ctx.font = `900 ${Math.round(size)}px ${FONT}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = size * 0.12;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.strokeText(text, 0, 0);
+    ctx.fillStyle = color;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  // A thin bar under the apps' top bar: how much is left (or reached).
+  function bar(ctx, w, h, f, alpha, y = h * (SAFE.top - 0.004)) {
+    if (alpha <= 0.002) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = alpha;
+    const x = w * 0.08, bw = w * 0.84, bh = Math.max(3, h * 0.007);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+    ctx.beginPath();
+    ctx.roundRect(x, y, bw, bh, bh / 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.roundRect(x, y, Math.max(bh, bw * clamp(f, 0, 1)), bh, bh / 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Extreme zoom on the most detailed spot; it pulls back in hits (each one
+  // with more shapes) until the whole frame, then the original.
+  function makeMystery(src, b, interp) {
+    const video = src.kind === "video", D = lengthOf(src), N = shapeCount(src);
+    const [F, X] = finale(src, D, 0.78 * D, 0.3);
+    const R = Math.max(F, 0.6 * D); // the clues need most of the reel
+    const S = 5, per = R / S, Z = 6;
+    const counts = [0.35, 0.5, 0.65, 0.82, 1].map((f) => Math.max(1, Math.round(N * f)));
+    const zooms = [...Array(S)].map((_, k) => Z ** (1 - k / (S - 1)));
+    const spot = hotspots(video ? firstFrame(src.anim) : src.image, 1)[0];
+    const stage = (t) => clamp(Math.floor(t / per), 0, S - 1);
+    const zoomAt = (t) => {
+      if (t >= R) return 1 + 0.06 * (1 - backOut((t - R) / 0.4)); // a last hit as the original comes
+      const k = stage(t), u = t - k * per;
+      const from = k ? zooms[k - 1] : zooms[0] * 1.3;
+      const z = Math.exp(Math.log(from) + (Math.log(zooms[k]) - Math.log(from)) * backOut(u / 0.35));
+      return Math.max(1, z * (1 + 0.06 * smooth(u / per))); // and a slow push in meanwhile
+    };
+    return {
+      duration: D, videoTime: video ? (t) => t : () => null, originalFrom: R,
+      vars: (t) => ({ pista: stage(t) + 1, pistas: S }),
+      paint(ctx, t, w, h) {
+        const v = view(spot.x, spot.y, zoomAt(t)), n = counts[stage(t)];
+        if (video) Motion.render(ctx, src.anim, t, interp, w, h, n, true, v);
+        else shapesView(ctx, src.image, w, h, n, v);
+        overlay(ctx, smooth((t - R) / X), () => originalView(src, ctx, w, h, v));
+        for (let k = 1; k < S; k++) flash(ctx, t, k * per, w, h);
+        flash(ctx, t, R, w, h);
+        bar(ctx, w, h, 1 - t / R, 1 - smooth((t - R) / 0.3));
+      },
+    };
+  }
+
+  // 3, 2, 1: a burst of shapes with each number, the photo on "Go!", and
+  // back to the first frame at the end so it loops.
+  function makeCountdown(src, b) {
+    const D = src.duration, img = src.image, N = img.shapes.length, scratch = new Map();
+    const beat = 0.16 * D, go = 3 * beat, reveal = go + 0.45 * beat, back = D - Math.min(0.7, 0.08 * D);
+    const steps = [0.05, 0.15, 0.4, 0.7, 1]; // shapes in at the start, after each burst
+    const amount = (t) => {
+      if (t >= go) return steps[3] + (1 - steps[3]) * outCubic((t - go) / (0.3 * beat));
+      const k = Math.floor(t / beat);
+      return steps[k] + (steps[k + 1] - steps[k]) * outCubic((t - k * beat) / (0.35 * beat));
+    };
+    const hit = (t) => { // the last beat (a number or Go!) and how long ago
+      const at = t >= go ? go : Math.floor(t / beat) * beat;
+      return { at, u: t - at };
+    };
+    const word = words(src.lang ?? "es").go;
+    return {
+      duration: D, videoTime: () => null, originalFrom: reveal,
+      paint(ctx, t, w, h) {
+        const { at, u } = hit(t);
+        const z = t < back ? 1 + 0.07 * (1 - backOut(u / 0.3)) : 1;
+        const n = t >= back ? Math.round(N * steps[0]) : Math.round(N * amount(t));
+        zoomed(ctx, w, h, z, scratch, (g, gw, gh) => drawShapes(g, img, gw, gh, n));
+        // The photo from "Go!" on, back to the first frame at the end.
+        overlay(ctx, Math.min(smooth((t - reveal) / 0.25), 1 - smooth((t - back) / (D - back))),
+          () => originalView(src, ctx, w, h, view(0.5, 0.45, 1 + 0.06 * smooth((t - reveal) / (back - reveal))))); // never still
+        flash(ctx, t, reveal, w, h);
+        if (t < reveal) {
+          const label = t >= go ? word : String(3 - Math.floor(t / beat));
+          const len = t >= go ? reveal - go : beat;
+          bigText(ctx, label, w / 2, h * 0.47, h * (t >= go ? 0.16 : 0.22), 1 + 0.5 * (1 - backOut(u / 0.3)), 1 - smooth((u - 0.7 * len) / (0.3 * len)));
+        }
+        bar(ctx, w, h, t / reveal, 1 - smooth((t - reveal) / 0.3));
+      },
+    };
+  }
+
+  // A likeness percentage goes up as the shapes come, with a hit at each
+  // milestone, until the original.
+  function makeSimilarity(src, b) {
+    const D = src.duration, img = src.image, N = img.shapes.length, lang = src.lang ?? "es", scratch = new Map();
+    const [F, X] = finale(src, D, 0.8 * D, 0.3);
+    const { plan, count } = countUp(img, b, Math.max(1, 0.92 * F - 0.3), D);
+    const sim = (n) => 100 * (1 - (n > 0 ? img.scores?.[n - 1] ?? 0 : img.baseScore ?? 1));
+    const s0 = sim(0), s1 = sim(N);
+    // Four round milestones between the start and the end, and when each is reached.
+    const marks = [1, 2, 3, 4].map((i) => Math.floor(s0 + ((s1 - s0) * i) / 5));
+    const times = marks.map((m) => {
+      for (let t = 0; t < F; t += 0.02) if (sim(count(t + 0.3)) >= m) return t;
+      return Infinity;
+    });
+    const fmt = (x) => x.toLocaleString(lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+    return {
+      duration: D, videoTime: () => null, originalFrom: F,
+      paint(ctx, t, w, h) {
+        const last = times.filter((x) => x <= t).pop(), u = last != null ? t - last : Infinity;
+        zoomed(ctx, w, h, 1 + 0.05 * (1 - backOut(u / 0.3)), scratch, (g, gw, gh) => plan.render(g, t + 0.3, gw, gh));
+        overlay(ctx, smooth((t - F) / X), () => originalView(src, ctx, w, h, view(0.5, 0.45, 1 + 0.06 * smooth((t - F) / (D - F)))));
+        for (const at of times) flash(ctx, t, at, w, h);
+        flash(ctx, t, F, w, h);
+        const s = sim(count(t + 0.3)), a = 1 - smooth((t - F) / 0.3);
+        // Gold for a moment at each milestone.
+        bigText(ctx, fmt(s), w / 2, h * 0.7, h * 0.085, 1 + 0.35 * (1 - backOut(u / 0.35)), a, u < 0.6 ? "#ffd23f" : "#fff");
+        bar(ctx, w, h, (s - s0) / Math.max(1e-6, s1 - s0), a, h * 0.755);
+      },
+    };
+  }
+
+  // A lens goes over the most detailed spots showing the original under the
+  // shapes; at the end it opens to the whole frame, and closes again (loop).
+  function makeLens(src, b, interp) {
+    const video = src.kind === "video", D = lengthOf(src);
+    const spots = hotspots(video ? firstFrame(src.anim) : src.image, 3);
+    const E = 0.76 * D, per = E / spots.length, close = D - Math.min(0.8, 0.08 * D);
+    const at = (t) => { // lens center (fractions): dwell at each spot, move to the next one
+      const k = clamp(Math.floor(t / per), 0, spots.length - 1), u = (t - k * per) / per;
+      const p = spots[k], q = spots[Math.min(k + 1, spots.length - 1)];
+      const m = k < spots.length - 1 ? smooth((u - 0.65) / 0.35) : 0;
+      const wob = 0.012 * Math.sin(t * 3.1);
+      return { x: p.x + (q.x - p.x) * m + wob, y: p.y + (q.y - p.y) * m + wob * 0.6 };
+    };
+    return {
+      duration: D, videoTime: video ? (t) => t : () => null, originalFrom: 0,
+      paint(ctx, t, w, h) {
+        if (video) Motion.render(ctx, src.anim, t, interp, w, h);
+        else drawShapes(ctx, src.image, w, h, Infinity);
+        const c = at(Math.min(t, E)), x = c.x * w, y = c.y * h;
+        const open = smooth((t - E) / 0.7) * (1 - smooth((t - close) / (D - close)));
+        const base = w * 0.2 * (1 + 0.04 * Math.sin(t * 5)); // it breathes
+        const r = base + (Math.hypot(w, h) - base) * open, m = 1.25 - 0.25 * open;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, 2 * Math.PI);
+        ctx.clip();
+        src.paintOriginal(ctx, x - x * m, y - y * m, w * m, h * m);
+        ctx.restore();
+        if (open < 0.98) { // the ring and the handle
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.globalAlpha = 1 - open;
+          ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+          ctx.shadowBlur = w * 0.015;
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = Math.max(3, w * 0.012);
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.lineWidth = Math.max(6, w * 0.03);
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(x + r * 0.72, y + r * 0.72);
+          ctx.lineTo(x + r * 1.15, y + r * 1.15);
+          ctx.stroke();
+          ctx.restore();
+        }
+        flash(ctx, t, E, w, h);
       },
     };
   }

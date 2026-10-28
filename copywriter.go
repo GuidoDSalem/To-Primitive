@@ -147,6 +147,10 @@ var templateTexts = map[string]map[string]string{
 	"counter":      {"counter": "{n} {tipo}"},
 	"countCurtain": {"counter": "{n} {tipo}", "question": "¿Se nota la diferencia?"},
 	"countVideo":   {"counter": "{n} {tipo}"},
+	"mystery":      {"question": "¿Qué es? Adiviná antes del final 👀", "clue": "Pista {pista} de {pistas}", "closing": "¿Lo adivinaste? 👇"},
+	"countdown":    {"closing": "¿Otra vez? 🔁"},
+	"similarity":   {"question": "¿Hasta qué % llega?", "closing": "¿A qué % la reconociste? 👇"},
+	"lens":         {"question": "¿Qué esconden las formas? 🔍"},
 }
 
 // ---------- prompt and schema (shared by the models) ----------

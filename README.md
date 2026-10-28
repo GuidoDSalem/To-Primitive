@@ -160,6 +160,10 @@ En el navegador, con cámara simulada en Chrome:
    | **Contador y cortina** | Foto o video | Las formas se suman con un contador grande; cuando la imagen está completa, una cortina entra desde el borde y va y viene comparándola con el original. En un video, el contador arma su primer cuadro y durante la cortina el video corre (formas de un lado, original del otro) |
    | **Contador y video** | Video | Un contador arma con formas el primer cuadro del video; cuando está completo, el video arranca con las formas en movimiento, y al final aparece el original |
    | **Tapado** | Foto o video | Empieza con el original y las formas lo van tapando una a una mientras el original se apaga debajo, hasta que solo quedan las formas |
+   | **¿Qué es?** | Foto o video | Pensado para retener: arranca con un zoom extremo al detalle más rico y se aleja a golpes (cada golpe con un destello y más formas), con "Pista 1 de 5", una barra de tiempo que se vacía y la pregunta arriba, hasta revelar el original |
+   | **3, 2, 1** | Foto | Cuenta regresiva grande: con cada número entra una ráfaga de formas y un golpe de zoom; en "¡Ya!" aparece la foto con un destello, se mueve despacio y al final vuelve al primer cuadro para verse en loop |
+   | **Similitud %** | Foto | Un porcentaje real de parecido (el del algoritmo) sube con una barra mientras se arma; en cada hito redondo el número salta, se pone dorado y hay un golpe de zoom; al final, el original |
+   | **Lupa** | Foto o video | Una lupa recorre los tres lugares con más detalle mostrando el original debajo de las formas (siempre hay un punto donde mirar); al final se abre a todo el cuadro y se vuelve a cerrar, para el loop |
 
    *Automático* elige Revelado para fotos y Video en formas para videos.
 

@@ -122,16 +122,19 @@ const Motion = (() => {
   }
 
   // Draw the animation at time t (seconds) filling a w x h canvas (only the
-  // first `limit` shapes, if given; background: false, only the shapes).
-  function render(ctx, anim, t, mode, w, h, limit, background = true) {
+  // first `limit` shapes, if given; background: false, only the shapes;
+  // view: { cx, cy, z }, zoomed z times around that point, as fractions).
+  function render(ctx, anim, t, mode, w, h, limit, background = true, view = null) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (background) {
       ctx.fillStyle = anim.background;
       ctx.fillRect(0, 0, w, h);
     }
-    const sx = w / anim.width, sy = h / anim.height;
+    const z = view?.z ?? 1;
+    const sx = (w / anim.width) * z, sy = (h / anim.height) * z;
+    const ox = view ? w / 2 - view.cx * w * z : 0, oy = view ? h / 2 - view.cy * h * z : 0;
     // Same half-pixel offset primitive uses when drawing.
-    ctx.setTransform(sx, 0, 0, sy, 0.5 * sx, 0.5 * sy);
+    ctx.setTransform(sx, 0, 0, sy, ox + 0.5 * sx, oy + 0.5 * sy);
     for (const [s, f] of shapesAt(anim, t * anim.kfps, mode, limit)) drawShape(ctx, s, f);
   }
 
