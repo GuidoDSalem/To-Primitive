@@ -35,6 +35,15 @@ function showSettings(o) {
     label.append(box, ` ${name(t)} `, Object.assign(document.createElement("span"), { className: "kinds", textContent: `(${kinds(t)})` }));
     return label;
   }));
+  // The groups: only those, with one click (Guardar keeps it).
+  $("templateGroups").replaceChildren(...Object.values(Templates.GROUPS).map((g) => button(`Solo ${g.name.toLowerCase()}`, g.desc, () => {
+    for (const box of $("templates").querySelectorAll("input")) box.checked = g.ids.includes(box.dataset.value);
+    dirty = true;
+    $("saveStatus").textContent = `Marcados los ${g.name.toLowerCase()}: tocá Guardar.`;
+  })), button("Todos", "", () => {
+    for (const box of $("templates").querySelectorAll("input")) box.checked = true;
+    dirty = true;
+  }));
   $("langs").value = o.settings.languages.join(", ");
   $("llm").value = o.settings.llm.provider || "";
   $("llmModel").value = o.settings.llm.model || "";
@@ -239,6 +248,17 @@ function waitingCard(w) {
     all.textContent = every ? "Todos" : "Ninguno";
     update();
   });
+  // A group (Virales): marks its templates of this kind, or unmarks them if they all are.
+  const groups = Object.values(Templates.GROUPS).map((g) => {
+    const ids = g.ids.filter((t) => tpls.includes(t));
+    if (!ids.length) return null;
+    return button(g.name, g.desc, () => {
+      const every = ids.every((t) => c.tpls.has(t));
+      for (const t of ids) every ? c.tpls.delete(t) : c.tpls.add(t);
+      for (const box of grid.querySelectorAll(".tpl > input")) box.checked = c.tpls.has(box.closest(".tpl").dataset.value);
+      update();
+    });
+  }).filter(Boolean);
   const langs = Object.assign(document.createElement("input"), { type: "text", value: c.langs, title: "Idiomas, separados por comas" });
   langs.addEventListener("input", () => {
     c.langs = langs.value;
@@ -253,7 +273,7 @@ function waitingCard(w) {
     className: "button", href: `reels.html?src=${enc(w.name)}`, textContent: "Editarlo yo",
     title: "Abrirlo en el editor de reels y armarlo a mano; el reel va a Revisar (o directo a la cola)",
   });
-  foot.append(go, count, all, "Idiomas", langs, byHand, drop);
+  foot.append(go, count, all, ...groups, "Idiomas", langs, byHand, drop);
   body.append(head, grid, foot);
   card.append(thumb, body);
   update();

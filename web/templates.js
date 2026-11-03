@@ -188,6 +188,8 @@ const Templates = (() => {
     },
   };
   const auto = (kind) => (kind === "video" ? "shapes" : "reveal");
+  // Groups to pick at once in Generar (each source keeps the ones of its kind).
+  const GROUPS = { virales: { name: "Virales", desc: "Los pensados para retener: ¿Qué es?, 3 2 1, Similitud % y Lupa", ids: ["mystery", "countdown", "similarity", "lens"] } };
 
   const POSITIONS = { top: "Arriba", half: "Mitad (debajo de la línea)", middle: "Centro", lower: "Abajo", foot: "Al pie" };
   const STYLES = { title: "Título", subtitle: "Subtítulo", question: "Pregunta", label: "Etiqueta", counter: "Contador (grande)" };
@@ -1098,5 +1100,5 @@ const Templates = (() => {
     ctx.restore();
   }
 
-  return { LIST, SAFE, POSITIONS, STYLES, SHAPE_NAMES, OUTRO_KINDS, CTA, words, auto, make, outro, phrasesFor, phraseAlpha, drawTexts };
+  return { LIST, GROUPS, SAFE, POSITIONS, STYLES, SHAPE_NAMES, OUTRO_KINDS, CTA, words, auto, make, outro, phrasesFor, phraseAlpha, drawTexts };
 })();
