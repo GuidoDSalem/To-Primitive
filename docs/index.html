@@ -3,17 +3,113 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shape it up</title>
+<title>Shape it up · Photos and videos remade with geometric shapes</title>
+<meta name="description" content="Shape it up turns photos and videos into art made of geometric shapes and short vertical videos, and publishes them to your own TikTok and YouTube accounts.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="Shape it up">
+<meta property="og:description" content="Photos and videos remade with geometric shapes, as short vertical videos.">
+<meta property="og:image" content="https://guidodsalem.github.io/To-Primitive/img/triangles.jpg">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-<main>
-  <h1>Shape it up</h1>
-  <p class="meta">To-Primitive · art made of geometric shapes</p>
-  <p>Shape it up is a personal tool, built on the open-source project <a href="https://github.com/GuidoDSalem/To-Primitive">To-Primitive</a>, that recreates photos and videos with geometric shapes and turns them into short vertical videos. It runs on its owner's own computer and publishes those videos to its owner's own YouTube and TikTok accounts.</p>
-  <p>Shape it up es una herramienta personal, basada en el proyecto de código abierto To-Primitive, que recrea fotos y videos con formas geométricas y los convierte en videos verticales cortos. Corre en la computadora de su dueño y publica esos videos en sus propias cuentas de YouTube y TikTok.</p>
-  <p><a href="app/"><strong>Try the browser demo · Probar la demo en el navegador</strong></a> (images and live camera · imágenes y cámara en vivo)</p>
-  <nav><a href="terms.html">Terms of Service · Términos</a><a href="privacy.html">Privacy Policy · Privacidad</a></nav>
+<body class="site">
+<header class="top">
+  <a class="brand" href="index.html"><img src="icon.svg" alt="" width="32" height="32">Shape it up</a>
+  <nav>
+    <a href="#how">How it works</a>
+    <a href="#gallery">Gallery</a>
+    <a href="#templates">Templates</a>
+    <a href="#publishing">Publishing</a>
+    <a href="#faq">FAQ</a>
+    <a href="app/" class="cta">Try it</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <div>
+    <h1>Any photo or video, remade with geometric shapes.</h1>
+    <p class="lead">Shape it up rebuilds your images one shape at a time (triangles, circles, rectangles, polygons) and turns the result into short vertical videos ready for TikTok, YouTube Shorts and Reels. When a video is ready, you review it and publish it to your own account.</p>
+    <p class="buttons"><a class="button primary" href="app/">Try it in your browser</a><a class="button" href="https://github.com/GuidoDSalem/To-Primitive">Source code on GitHub</a></p>
+    <p class="small">Free and open source. The browser version works with images and your camera, with nothing to install.</p>
+  </div>
+  <figure class="pair">
+    <img src="img/original.jpg" alt="The Mona Lisa, original painting" width="477" height="720">
+    <img src="img/triangles.jpg" alt="The Mona Lisa remade with 400 triangles" width="477" height="720">
+    <figcaption>Original · 400 triangles</figcaption>
+  </figure>
+</section>
+
+<main class="wide">
+  <section id="how">
+    <h2>How it works</h2>
+    <p>An algorithm looks for the one shape that makes the picture most like the original, adds it, and starts again. The first shapes block in the big areas; the later ones bring the detail.</p>
+    <ol class="steps">
+      <li><img src="img/step10.jpg" alt="10 shapes" loading="lazy"><strong>1 · Upload</strong> a photo or a video, or drop it in a folder.</li>
+      <li><img src="img/step50.jpg" alt="50 shapes" loading="lazy"><strong>2 · Watch it build</strong>, live, and tune the number and kind of shapes.</li>
+      <li><img src="img/step150.jpg" alt="150 shapes" loading="lazy"><strong>3 · Pick a template</strong>: the reveal, a countdown, a lens, a guessing game…</li>
+      <li><img src="img/triangles.jpg" alt="400 shapes" loading="lazy"><strong>4 · Review and publish</strong> the vertical video (1080×1920) to your own account.</li>
+    </ol>
+  </section>
+
+  <section id="gallery">
+    <h2>Gallery</h2>
+    <p>The same painting with four kinds of shapes, 400 of each.</p>
+    <div class="gallery">
+      <figure><img src="img/triangles.jpg" alt="Triangles" loading="lazy"><figcaption>Triangles</figcaption></figure>
+      <figure><img src="img/circles.jpg" alt="Circles" loading="lazy"><figcaption>Circles</figcaption></figure>
+      <figure><img src="img/rectangles.jpg" alt="Rotated rectangles" loading="lazy"><figcaption>Rectangles</figcaption></figure>
+      <figure><img src="img/polygons.jpg" alt="Polygons" loading="lazy"><figcaption>Polygons</figcaption></figure>
+    </div>
+    <p class="small">Mona Lisa, Leonardo da Vinci (public domain).</p>
+  </section>
+
+  <section id="templates">
+    <h2>Video templates</h2>
+    <p>Each template is a short story with the shapes. Texts, music and an ending with your brand are set per video, in several languages.</p>
+    <div class="cards">
+      <div><h3>Reveal</h3><p>The shapes build the picture, then the real photo appears.</p></div>
+      <div><h3>What is it?</h3><p>Starts on an extreme close-up and pulls back in steps, with clues, until the reveal.</p></div>
+      <div><h3>3, 2, 1</h3><p>A countdown: each number brings a burst of shapes, and on "Go!" the photo.</p></div>
+      <div><h3>Likeness %</h3><p>A real likeness percentage climbs as the picture builds, with a hit at each milestone.</p></div>
+      <div><h3>Lens</h3><p>A magnifying glass shows the original hidden under the shapes.</p></div>
+      <div><h3>Curtain</h3><p>A line sweeps back and forth: the original on one side, the shapes on the other.</p></div>
+      <div><h3>Which level?</h3><p>10, 25, 50, 100 shapes… at which level did you recognize it?</p></div>
+      <div><h3>Video in shapes</h3><p>A whole video turned into moving shapes, then the original.</p></div>
+    </div>
+  </section>
+
+  <section id="publishing">
+    <h2>Publishing to TikTok and YouTube</h2>
+    <p>Shape it up publishes only to accounts you connect yourself, and only the videos you send.</p>
+    <ul class="checks">
+      <li><strong>You connect your own account</strong> with the official sign-in of TikTok (Login Kit) or Google. Shape it up never sees your password.</li>
+      <li><strong>You review every post</strong> before it goes out: the video, the caption, who can see it, whether comments, Duet and Stitch are allowed, and the disclosure of branded or promotional content. Nothing is published until you confirm.</li>
+      <li><strong>Official APIs only</strong>: TikTok's Content Posting API and the YouTube Data API. It uses your basic profile to show which account is connected, and permission to publish your videos.</li>
+      <li><strong>Your data stays with you</strong>: the app runs on your own computer, the access tokens are stored only there, and "Disconnect" deletes them. You can also revoke access at any time from your TikTok or Google account settings.</li>
+    </ul>
+    <p>See the <a href="privacy.html">Privacy Policy</a> and the <a href="terms.html">Terms of Service</a>.</p>
+  </section>
+
+  <section id="faq">
+    <h2>Questions</h2>
+    <details><summary>Is it free?</summary><p>Yes. Shape it up is open source (<a href="https://github.com/GuidoDSalem/To-Primitive">To-Primitive on GitHub</a>). There are no accounts, subscriptions or payments.</p></details>
+    <details><summary>Do I need to install anything?</summary><p>To try it, no: <a href="app/">the browser version</a> works with images and your camera. The full app, with video, templates and publishing, runs on your computer with Docker.</p></details>
+    <details><summary>What happens with my photos and videos?</summary><p>They stay on your computer. They only leave it when you publish one, and only to the account you chose.</p></details>
+    <details><summary>Can it post without me?</summary><p>Only if you set a publishing schedule yourself, and only videos you put in your own queue. Posting right away always shows the confirmation screen first.</p></details>
+    <details><summary>Who makes it?</summary><p>An independent creator, as an open-source project. Questions and suggestions are welcome on the <a href="https://github.com/GuidoDSalem/To-Primitive/issues">project's GitHub page</a>.</p></details>
+  </section>
+
+  <section id="es" lang="es">
+    <h2>En español</h2>
+    <p>Shape it up recrea fotos y videos con formas geométricas (triángulos, círculos, rectángulos, polígonos) y los convierte en videos verticales cortos para TikTok, YouTube Shorts y Reels, con templates, textos en varios idiomas, música y una escena final de marca. Cada video se revisa antes de publicarlo en tu propia cuenta: quién lo ve, comentarios, Dúo y Stitch, y si es contenido de marca. La app corre en tu computadora y los permisos de las cuentas se guardan solo ahí. <a href="app/">Probala en el navegador</a> · <a href="terms.html">Términos</a> · <a href="privacy.html">Privacidad</a>.</p>
+  </section>
 </main>
+
+<footer class="bottom">
+  <a class="brand" href="index.html"><img src="icon.svg" alt="" width="24" height="24">Shape it up</a>
+  <nav><a href="terms.html">Terms of Service</a><a href="privacy.html">Privacy Policy</a><a href="https://github.com/GuidoDSalem/To-Primitive">GitHub</a><a href="https://github.com/GuidoDSalem/To-Primitive/issues">Contact</a></nav>
+  <p class="small">© 2026 Shape it up · To-Primitive</p>
+</footer>
 </body>
 </html>
