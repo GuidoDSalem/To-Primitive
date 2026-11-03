@@ -55,8 +55,9 @@ const Motion = (() => {
   }
 
   // The shapes to draw at keyframe position x (fractional keyframe index), in
-  // drawing order, each with an opacity factor: [[shape, factor], ...].
-  function shapesAt(anim, x, mode) {
+  // drawing order, each with an opacity factor: [[shape, factor], ...]. With
+  // limit, only the first `limit` shapes (the coarsest) of each keyframe.
+  function shapesAt(anim, x, mode, limit = Infinity) {
     const kfs = anim.keyframes;
     if (!kfs.length) return [];
     x = clamp(x, 0, kfs.length - 1);
@@ -64,7 +65,7 @@ const Motion = (() => {
     const u = mode === "step" ? 0 : x - k;
     const A = kfs[k], B = kfs[k + 1];
     const out = [];
-    for (let i = 0; i < A.length; i++) {
+    for (let i = 0; i < Math.min(A.length, limit); i++) {
       const a = A[i], b = B?.[i];
       if (!b || u === 0) out.push([a, 1]);
       else if (continues(a, b)) out.push([between(kfs, i, k, u, mode), 1]);
@@ -120,15 +121,21 @@ const Motion = (() => {
     }
   }
 
-  // Draw the animation at time t (seconds) filling a w x h canvas.
-  function render(ctx, anim, t, mode, w, h) {
+  // Draw the animation at time t (seconds) filling a w x h canvas (only the
+  // first `limit` shapes, if given; background: false, only the shapes;
+  // view: { cx, cy, z }, zoomed z times around that point, as fractions).
+  function render(ctx, anim, t, mode, w, h, limit, background = true, view = null) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = anim.background;
-    ctx.fillRect(0, 0, w, h);
-    const sx = w / anim.width, sy = h / anim.height;
+    if (background) {
+      ctx.fillStyle = anim.background;
+      ctx.fillRect(0, 0, w, h);
+    }
+    const z = view?.z ?? 1;
+    const sx = (w / anim.width) * z, sy = (h / anim.height) * z;
+    const ox = view ? w / 2 - view.cx * w * z : 0, oy = view ? h / 2 - view.cy * h * z : 0;
     // Same half-pixel offset primitive uses when drawing.
-    ctx.setTransform(sx, 0, 0, sy, 0.5 * sx, 0.5 * sy);
-    for (const [s, f] of shapesAt(anim, t * anim.kfps, mode)) drawShape(ctx, s, f);
+    ctx.setTransform(sx, 0, 0, sy, ox + 0.5 * sx, oy + 0.5 * sy);
+    for (const [s, f] of shapesAt(anim, t * anim.kfps, mode, limit)) drawShape(ctx, s, f);
   }
 
   // ---------- MP4 export (WebCodecs) ----------
@@ -167,7 +174,8 @@ const Motion = (() => {
     }, opts);
   }
 
-  // Encode any source { width, height, duration, render(ctx, t, w, h) }.
+  // Encode any source { width, height, duration, render(ctx, t, w, h) }; an
+  // optional async prepare(t) runs before each frame (e.g. to seek a video).
   async function encodeMP4(src, { fps, longSide, onProgress, signal }) {
     const [w, h] = outputSize(src, longSide);
     const { kind, config } = await pickEncoder(w, h, fps);
@@ -192,6 +200,7 @@ const Motion = (() => {
       for (let f = 0; f < total; f++) {
         if (signal?.aborted) throw new DOMException("cancelado", "AbortError");
         if (failure) throw failure;
+        if (src.prepare) await src.prepare(f / fps);
         src.render(ctx, f / fps, w, h);
         const frame = new VideoFrame(canvas, { timestamp: Math.round((f * 1e6) / fps), duration: Math.round(1e6 / fps) });
         encoder.encode(frame, { keyFrame: f % Math.round(fps * 2) === 0 });

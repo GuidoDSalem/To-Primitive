@@ -11,7 +11,7 @@
   <aside id="panel">
     <header>
       <h1>To-Primitive</h1>
-      <p class="sub">Imágenes y videos reconstruidos con formas geométricas</p>
+      <p class="sub">Imágenes y videos reconstruidos con formas geométricas · <a href="reels.html">editor de reels</a> · <a href="generar.html">generar</a> · <a href="revisar.html">revisar</a> · <a href="publicar.html">publicar</a></p>
     </header>
 
     <section>
@@ -41,7 +41,7 @@
         <h2>Formas</h2>
         <div class="field">
           <label for="shapes">Cantidad <output id="shapesOut"></output></label>
-          <input id="shapes" type="range" min="1" max="2000" value="200">
+          <input id="shapes" type="range" min="1" max="2500" value="200">
           <p class="hint">Cambiarla no reinicia: agrega o quita formas en vivo.</p>
         </div>
         <div class="field">
@@ -172,6 +172,10 @@
         </div>
         <div class="field">
           <label for="recCurve">Velocidad (curva de easing)</label>
+          <div id="curveView" class="chips curve-view">
+            <button type="button" data-value="curve">Curva</button>
+            <button type="button" data-value="result">Resultado</button>
+          </div>
           <select id="recCurve"></select>
           <p class="hint" id="curveHint"></p>
         </div>
@@ -336,6 +340,7 @@
     <button id="compare" hidden title="Mantené apretado (o la barra espaciadora) para ver el original">Ver original</button>
   </main>
 
+  <script src="busy.js"></script>
   <script src="mp4.js"></script>
   <script src="motion.js"></script>
   <script src="build.js"></script>

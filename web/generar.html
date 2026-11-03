@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive · Generar</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="publicar.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Generar reels</h1>
+      <p class="sub">Fotos y videos → varios reels por fuente, solos · <a href="revisar.html">revisar</a> · <a href="publicar.html">publicar</a> · <a href="reels.html">editor de reels</a></p>
+    </header>
+
+    <section>
+      <h2>Generador</h2>
+      <label class="check big"><input id="enabled" type="checkbox"> Generar automáticamente</label>
+      <label class="check"><input id="ask" type="checkbox"> Preguntar qué templates probar en cada foto o video</label>
+      <p class="hint">Cada foto o video nuevo (subido o dejado en la carpeta de entrada) espera a que elijas sus templates; después se hace un reel por template e idioma, con la configuración base de cada uno, de a uno. Sin preguntar, se hacen todos los templates por defecto apenas aparece.</p>
+      <div class="field" style="margin-top:12px">
+        <label>Templates por defecto <span class="kinds">(cuando no pregunta)</span></label>
+        <div id="templates" class="checks"></div>
+        <div id="templateGroups" class="chips" style="margin-top:6px"></div>
+      </div>
+      <div class="field">
+        <label for="langs">Idiomas</label>
+        <input id="langs" type="text" placeholder="es, en">
+        <p class="hint">Códigos de dos letras, separados por comas: cada reel se genera una vez por idioma, con sus frases en pantalla, título, descripción y tags.</p>
+      </div>
+      <div class="field">
+        <label for="llm">Quién escribe los textos</label>
+        <select id="llm">
+          <option value="">Automático (Claude si hay API key, si no modelo local o reglas)</option>
+          <option value="anthropic">Claude (API de Anthropic)</option>
+          <option value="local">Modelo local (Ollama, LM Studio…)</option>
+          <option value="none">Reglas, sin modelo</option>
+        </select>
+      </div>
+      <div id="llmLocal" class="field" hidden>
+        <label for="llmBase">Dirección del modelo local</label>
+        <input id="llmBase" type="text" placeholder="http://host.docker.internal:11434/v1">
+      </div>
+      <div class="field">
+        <label for="llmModel">Modelo</label>
+        <input id="llmModel" type="text" placeholder="por defecto">
+      </div>
+      <p id="writerInfo" class="hint"></p>
+      <button id="save" class="wide primary">Guardar</button>
+      <p id="saveStatus" class="hint"></p>
+    </section>
+
+    <section>
+      <h2>Carpetas</h2>
+      <p id="inInfo" class="hint"></p>
+      <p class="hint">También podés dejar archivos directamente en esa carpeta.</p>
+      <p id="outInfo" class="hint"></p>
+      <p id="browserInfo" class="hint"></p>
+    </section>
+
+    <section>
+      <h2>Registro</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+  </aside>
+
+  <main id="stage" class="pub-stage">
+    <div class="pub-head">
+      <h2>Subir fotos o videos</h2>
+      <button id="refresh" type="button">Actualizar</button>
+    </div>
+    <div id="dropzone" class="dropzone">
+      <p><strong>Arrastrá fotos o videos acá</strong></p>
+      <p class="hint">Se guardan en la carpeta de entrada; después elegís qué templates probar.</p>
+      <button id="pick" type="button" class="primary">Elegir archivos…</button>
+      <input id="files" type="file" accept="image/*,video/*" multiple hidden>
+    </div>
+    <p id="paused" class="warn-line" hidden>El generador está pausado: lo que subas queda en la entrada, pero no se genera hasta activarlo. <button id="enableNow" type="button">Activar</button></p>
+
+    <div id="waitingBox" hidden>
+      <h2 style="margin-top:22px">Elegí qué templates probar <span id="waitCount" class="count"></span></h2>
+      <div id="waiting" class="waiting"></div>
+    </div>
+
+    <h2 style="margin-top:22px">En proceso <span id="jobCount" class="count"></span></h2>
+    <div id="sources" class="jobs"></div>
+
+    <h2 style="margin-top:28px">Generados <span id="outCount" class="count"></span></h2>
+    <p class="next"><span id="outSummary"></span> <a class="button" href="revisar.html">Revisar →</a></p>
+  </main>
+
+  <script src="busy.js"></script>
+  <script src="templates.js"></script>
+  <script src="generar.js"></script>
+</body>
+</html>

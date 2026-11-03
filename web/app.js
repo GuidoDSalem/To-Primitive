@@ -139,6 +139,8 @@ function renderStats(visible) {
   if (!p) return;
   const similarity = ((1 - state.score) * 100).toFixed(2);
   const status = state.running ? "Generando…" : p.paused ? "Pausado" : "Listo";
+  if (state.running && !state.video) Busy.set("shapes", visible / p.shapes, "Formas");
+  else Busy.done("shapes");
   const rate = state.running && state.rate.value ? ` · ${state.rate.value.toFixed(1)} formas/s` : "";
   $("stats").innerHTML =
     `<b>${status}</b>${rate}<br>Formas: <b>${visible}</b> / ${p.shapes}` +
@@ -500,7 +502,7 @@ function showJob(j) {
   const running = j?.state === "running";
   $("compute").hidden = running;
   $("cancelCompute").hidden = !running;
-  $("progress").hidden = !j;
+  $("progress").hidden = !j || !["running", "done"].includes(j.state); // a stopped one isn't processing
   $("exportAnimSection").hidden = j?.state !== "done";
   if (!j) {
     $("computeStatus").textContent = "";
@@ -842,37 +844,11 @@ const recording = (() => {
   Picker.attach($("recDirection"), variant("direction"));
   Picker.attach($("recOrder"), variant("order"));
   Picker.attach($("recEffect"), (value) => Build.plan(thumbImage(), { ...quick(), style: "2d", effect: value, curve: "linear", order: "original" }));
-  // Curves: the plot of the curve, a dot running along it, and a bar showing
-  // how much of the image is built.
+  // Curves: either the plot of the curve, or the build playing with it.
+  const curveView = Picker.curveToggle($("curveView"), "curve");
   Picker.attach($("recCurve"), (value) => {
-    const ease = value === "impact" ? Build.plan(thumbImage(), { ...quick(), curve: "impact" }).ease : Build.CURVES[value].f;
-    const css = getComputedStyle(document.documentElement);
-    return {
-      duration: 2.6,
-      render(ctx, t, w, h) {
-        const p = Math.min(1, t / 2);
-        const pad = 12, gw = w - 2 * pad, gh = h - 2 * pad - 14;
-        ctx.strokeStyle = css.getPropertyValue("--line");
-        ctx.lineWidth = 2;
-        ctx.strokeRect(pad, pad, gw, gh);
-        ctx.strokeStyle = css.getPropertyValue("--accent");
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        for (let k = 0; k <= 60; k++) {
-          const x = pad + (k / 60) * gw, y = pad + gh - ease(k / 60) * gh;
-          k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-        }
-        ctx.stroke();
-        ctx.fillStyle = css.getPropertyValue("--text");
-        ctx.beginPath();
-        ctx.arc(pad + p * gw, pad + gh - ease(p) * gh, 7, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.fillStyle = css.getPropertyValue("--line");
-        ctx.fillRect(pad, h - pad - 6, gw, 6);
-        ctx.fillStyle = css.getPropertyValue("--accent");
-        ctx.fillRect(pad, h - pad - 6, gw * ease(p), 6);
-      },
-    };
+    if (curveView() === "result") return planFor({ ...quick(), curve: value });
+    return Picker.curve(value === "impact" ? Build.plan(thumbImage(), { ...quick(), curve: "impact" }).ease : Build.CURVES[value].f);
   });
   // 3D: depth previews sway the camera over the finished image to show the
   // layering; assembly and camera previews play the whole build.

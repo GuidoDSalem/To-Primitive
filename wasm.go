@@ -22,7 +22,7 @@ var (
 )
 
 func main() {
-	mux := newServer("/tmp/to-primitive").routes()
+	mux := newServer("/tmp/to-primitive", "/tmp/to-primitive/reels").routes()
 	emit := js.Global().Get("goEmit")
 
 	js.Global().Set("goServe", js.FuncOf(func(_ js.Value, a []js.Value) any {
@@ -55,6 +55,9 @@ func main() {
 	js.Global().Call("goReady")
 	select {}
 }
+
+// static: the demo's pages come from GitHub Pages.
+func (srv *server) static(*http.ServeMux) {}
 
 func abort(id int) {
 	reqMu.Lock()

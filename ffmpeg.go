@@ -97,11 +97,53 @@ func fitFilter(size int) string {
 	return fmt.Sprintf("scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease:flags=bilinear", size, size)
 }
 
+// Crop is a region of the frame, as fractions of its width and height.
+type Crop struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+
+// valid reports whether the crop is a non-empty region inside the frame.
+func (c *Crop) valid() bool {
+	return c != nil && c.W > 0 && c.H > 0 && c.X >= 0 && c.Y >= 0 && c.X+c.W <= 1.0001 && c.Y+c.H <= 1.0001
+}
+
+// filter is the ffmpeg crop filter for c, or "" for none.
+func (c *Crop) filter() string {
+	if !c.valid() {
+		return ""
+	}
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', 5, 64) }
+	return fmt.Sprintf("crop=iw*%s:ih*%s:iw*%s:ih*%s", f(c.W), f(c.H), f(c.X), f(c.Y))
+}
+
+// chain joins ffmpeg filters, skipping empty ones.
+func chain(filters ...string) string {
+	var out []string
+	for _, f := range filters {
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
 // extractFrame decodes the frame at t seconds, scaled to fit size (0 = as is).
 func extractFrame(ctx context.Context, path string, t float64, size int) (image.Image, error) {
+	return extractCroppedFrame(ctx, path, t, nil, size)
+}
+
+// extractCroppedFrame is extractFrame on a region of the frame (nil: all of it).
+func extractCroppedFrame(ctx context.Context, path string, t float64, crop *Crop, size int) (image.Image, error) {
 	args := []string{"-v", "error", "-ss", strconv.FormatFloat(t, 'f', 3, 64), "-i", path, "-frames:v", "1"}
+	fit := ""
 	if size > 0 {
-		args = append(args, "-vf", fitFilter(size))
+		fit = fitFilter(size)
+	}
+	if vf := chain(crop.filter(), fit); vf != "" {
+		args = append(args, "-vf", vf)
 	}
 	args = append(args, "-f", "image2pipe", "-c:v", "png", "-")
 	out, err := runFFmpeg(ctx, "ffmpeg", args...)

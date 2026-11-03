@@ -1,0 +1,478 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// fakePlatforms imitates Google's OAuth and YouTube upload, and TikTok's
+// OAuth and Content Posting API, closely enough to drive the real code.
+type fakePlatforms struct {
+	t  *testing.T
+	mu sync.Mutex
+
+	challenge     string // TikTok PKCE challenge from the authorize URL
+	webRedirect   string // the https page TikTok sends back to (no PKCE then)
+	ytUploads     int
+	ytMeta        map[string]any
+	ttInit        map[string]any
+	ttBytes       int64
+	ttFailInit    bool // next TikTok init answers an error
+	refreshes     map[string]int
+	expiresIn     int // seconds the access tokens last
+	statusChecked int
+}
+
+func (f *fakePlatforms) handler() http.Handler {
+	mux := http.NewServeMux()
+	token := func(platform string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			r.ParseForm()
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			switch r.Form.Get("grant_type") {
+			case "authorization_code":
+				if r.Form.Get("code") != "good-code" || r.Form.Get("client_secret") != "secret" {
+					w.WriteHeader(400)
+					fmt.Fprint(w, `{"error":"invalid_grant","error_description":"bad code"}`)
+					return
+				}
+				if platform == "tiktok" {
+					sum := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
+					pkceBad := f.challenge != "" && hex.EncodeToString(sum[:]) != f.challenge
+					webBad := f.challenge == "" && (r.Form.Get("code_verifier") != "" || r.Form.Get("redirect_uri") != f.webRedirect)
+					if pkceBad || webBad || r.Form.Get("client_key") != "key" {
+						w.WriteHeader(400)
+						fmt.Fprint(w, `{"error":"invalid_request","error_description":"pkce"}`)
+						return
+					}
+				}
+			case "refresh_token":
+				f.refreshes[platform]++
+			}
+			fmt.Fprintf(w, `{"access_token":"%s-access-%d","refresh_token":"%s-refresh","expires_in":%d,"refresh_expires_in":31536000}`,
+				platform, f.refreshes[platform], platform, f.expiresIn)
+		}
+	}
+	mux.HandleFunc("POST /token", token("youtube"))
+	mux.HandleFunc("POST /v2/oauth/token/", token("tiktok"))
+	auth := func(r *http.Request, platform string) bool {
+		return strings.HasPrefix(r.Header.Get("Authorization"), "Bearer "+platform+"-access-")
+	}
+	mux.HandleFunc("GET /youtube/v3/channels", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"items":[{"snippet":{"title":"Shape it up"}}]}`)
+	})
+	mux.HandleFunc("POST /upload/youtube/v3/videos", func(w http.ResponseWriter, r *http.Request) {
+		if !auth(r, "youtube") || r.URL.Query().Get("uploadType") != "resumable" || r.Header.Get("X-Upload-Content-Length") == "" {
+			w.WriteHeader(401)
+			return
+		}
+		f.mu.Lock()
+		json.NewDecoder(r.Body).Decode(&f.ytMeta)
+		f.mu.Unlock()
+		w.Header().Set("Location", "http://"+r.Host+"/upload-session/1")
+	})
+	mux.HandleFunc("PUT /upload-session/1", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		if n == 0 || r.Header.Get("Content-Type") != "video/mp4" {
+			w.WriteHeader(400)
+			return
+		}
+		f.mu.Lock()
+		f.ytUploads++
+		f.mu.Unlock()
+		w.WriteHeader(201)
+		fmt.Fprint(w, `{"id":"yt123","status":{"privacyStatus":"public"}}`)
+	})
+	ok := func(w http.ResponseWriter, data string) {
+		fmt.Fprintf(w, `{"data":%s,"error":{"code":"ok","message":""}}`, data)
+	}
+	mux.HandleFunc("POST /v2/post/publish/creator_info/query/", func(w http.ResponseWriter, r *http.Request) {
+		// An unaudited app: only private.
+		ok(w, `{"creator_username":"shapeitup","creator_nickname":"Shape","privacy_level_options":["SELF_ONLY"],"max_video_post_duration_sec":600}`)
+	})
+	mux.HandleFunc("POST /v2/post/publish/video/init/", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.ttFailInit {
+			f.ttFailInit = false
+			fmt.Fprint(w, `{"data":{},"error":{"code":"spam_risk_too_many_posts","message":"try later"}}`)
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&f.ttInit)
+		ok(w, `{"publish_id":"v_pub_1","upload_url":"http://`+r.Host+`/tt-upload?token=x"}`)
+	})
+	mux.HandleFunc("PUT /tt-upload", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		f.mu.Lock()
+		f.ttBytes += n
+		f.mu.Unlock()
+		if !strings.HasPrefix(r.Header.Get("Content-Range"), "bytes 0-") {
+			w.WriteHeader(400)
+			return
+		}
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("POST /v2/post/publish/status/fetch/", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.statusChecked++
+		n := f.statusChecked
+		f.mu.Unlock()
+		if n < 2 {
+			ok(w, `{"status":"PROCESSING_UPLOAD"}`)
+			return
+		}
+		ok(w, `{"status":"PUBLISH_COMPLETE","publicaly_available_post_id":["7300"]}`)
+	})
+	return mux
+}
+
+func TestPlatforms(t *testing.T) {
+	dir, p, _ := pubFixture(t)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+
+	env := map[string]string{"YOUTUBE_CLIENT_ID": "yt-id", "YOUTUBE_CLIENT_SECRET": "secret", "TIKTOK_CLIENT_KEY": "key", "TIKTOK_CLIENT_SECRET": "secret"}
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(k string) string { return env[k] }
+	acc.ep = platformEndpoints{GoogleAuth: fake.URL + "/auth", GoogleToken: fake.URL + "/token", YouTubeAPI: fake.URL,
+		TikTokAuth: fake.URL + "/tiktok-auth", TikTokAPI: fake.URL}
+	p.up = &platformUploader{acc: acc, poll: time.Millisecond, wait: 5 * time.Second}
+
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	srv.pub, srv.acc = p, acc
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	// Connect both accounts as the browser would.
+	connect := func(platform string) {
+		res, err := noFollow.Get(ts.URL + "/api/publish/accounts/" + platform + "/connect")
+		if err != nil || res.StatusCode != 302 {
+			t.Fatalf("connect %s: %v %v", platform, err, res.Status)
+		}
+		u, _ := url.Parse(res.Header.Get("Location"))
+		q := u.Query()
+		wantRedirect := ts.URL + "/api/publish/oauth/" + platform + "/callback"
+		if q.Get("redirect_uri") != wantRedirect {
+			t.Errorf("%s redirect_uri %q", platform, q.Get("redirect_uri"))
+		}
+		if platform == "youtube" && (q.Get("access_type") != "offline" || !strings.Contains(q.Get("scope"), "youtube.upload")) {
+			t.Errorf("google auth %v", q)
+		}
+		if platform == "tiktok" {
+			if q.Get("client_key") != "key" || q.Get("code_challenge_method") != "S256" || !strings.Contains(q.Get("scope"), "video.publish") {
+				t.Errorf("tiktok auth %v", q)
+			}
+			f.challenge = q.Get("code_challenge")
+		}
+		res, err = noFollow.Get(wantRedirect + "?code=good-code&state=" + q.Get("state"))
+		if err != nil || res.StatusCode != 302 || !strings.Contains(res.Header.Get("Location"), "conectado="+platform) {
+			b, _ := io.ReadAll(res.Body)
+			t.Fatalf("callback %s: %v %s", platform, res.Status, b)
+		}
+	}
+	connect("youtube")
+	connect("tiktok")
+	if res, _ := noFollow.Get(ts.URL + "/api/publish/oauth/youtube/callback?code=good-code&state=made-up"); res.StatusCode != 400 {
+		t.Errorf("unknown state: %d", res.StatusCode)
+	}
+	status := acc.Status()
+	if !status[0].Connected || status[0].Account != "Shape it up" || !status[1].Connected || status[1].Account != "@shapeitup" {
+		t.Fatalf("status %+v", status)
+	}
+	if fi, err := os.Stat(acc.path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("tokens file: %v %v", err, fi.Mode())
+	}
+
+	// Publish on both. TikTok fails the first time: YouTube isn't repeated.
+	s := p.state.Settings
+	s.Platforms = []string{"youtube", "tiktok"}
+	if err := p.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	writeSidecar(filepath.Join(dir, "b viejo.mp4"), map[string]any{"title": "La <Mona> Lisa", "description": "Con formas #Shorts", "tags": []string{"arte", "low poly"}})
+	f.ttFailInit = true
+	if _, err := p.Publish(context.Background(), "b viejo.mp4", "a mano"); err == nil || !strings.Contains(err.Error(), "spam_risk_too_many_posts") || !strings.Contains(err.Error(), "no se repite") {
+		t.Fatalf("first try: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "b viejo.mp4")); err != nil {
+		t.Fatal("left the queue after failing")
+	}
+	q := p.Overview().Queue
+	if q[0].Name != "b viejo.mp4" || q[0].Uploads["youtube"].ID != "yt123" {
+		t.Fatalf("partial upload not noted: %+v", q[0].Uploads)
+	}
+	// Access tokens expire: the next publish refreshes them.
+	acc.mu.Lock()
+	for _, tok := range acc.tokens {
+		tok.Expiry = time.Now().Add(-time.Minute)
+	}
+	acc.mu.Unlock()
+	name, err := p.Publish(context.Background(), "b viejo.mp4", "a mano")
+	if err != nil {
+		t.Fatalf("second try: %v", err)
+	}
+	if f.ytUploads != 1 {
+		t.Errorf("YouTube got %d uploads", f.ytUploads)
+	}
+	if f.refreshes["tiktok"] != 1 {
+		t.Errorf("tiktok refreshes %v", f.refreshes)
+	}
+	pub := p.Overview().Published
+	if len(pub) != 1 || pub[0].Name != name || !strings.Contains(pub[0].Result, "https://youtube.com/shorts/yt123") ||
+		!strings.Contains(pub[0].Result, "https://www.tiktok.com/@shapeitup/video/7300") || !strings.Contains(pub[0].Result, "privado") {
+		t.Fatalf("published %+v", pub)
+	}
+	// What each platform got.
+	snip := f.ytMeta["snippet"].(map[string]any)
+	if snip["title"] != "La Mona Lisa" || f.ytMeta["status"].(map[string]any)["privacyStatus"] != "public" {
+		t.Errorf("youtube meta %v", f.ytMeta)
+	}
+	post := f.ttInit["post_info"].(map[string]any)
+	src := f.ttInit["source_info"].(map[string]any)
+	fi, _ := os.Stat(filepath.Join(dir, publishedDir, name))
+	if post["privacy_level"] != "SELF_ONLY" || !strings.Contains(post["title"].(string), "#arte") || !strings.Contains(post["title"].(string), "#lowpoly") ||
+		src["total_chunk_count"] != 1.0 || int64(src["video_size"].(float64)) != fi.Size() || f.ttBytes != fi.Size() {
+		t.Errorf("tiktok init %v, %d bytes sent", f.ttInit, f.ttBytes)
+	}
+
+	// Without platforms: simulated, as before.
+	s.Platforms = nil
+	p.SetSettings(s)
+	if _, err := p.Publish(context.Background(), "", "a mano"); err != nil {
+		t.Fatal(err)
+	}
+	if pub := p.Overview().Published; !strings.Contains(pub[0].Result, "simulado") {
+		t.Errorf("simulated: %q", pub[0].Result)
+	}
+	if err := p.SetSettings(PublishSettings{Times: []string{"10:00"}, Days: []int{1}, TZ: "UTC", Platforms: []string{"myspace"}}); err == nil {
+		t.Error("unknown platform accepted")
+	}
+}
+
+func TestTikTokChunks(t *testing.T) {
+	for _, c := range []struct {
+		size        int64
+		chunk       int64
+		count, last int64
+	}{
+		{3 << 20, 3 << 20, 1, 3 << 20},
+		{64 << 20, 64 << 20, 1, 64 << 20},
+		{50_000_123 * 2, 10 << 20, 9, 100_000_246 - 8*(10<<20)},
+	} {
+		chunk, count := tiktokChunks(c.size)
+		last := c.size - int64(count-1)*chunk
+		if chunk != c.chunk || int64(count) != c.count || last != c.last || last > 128<<20 {
+			t.Errorf("tiktokChunks(%d) = %d × %d (last %d)", c.size, chunk, count, last)
+		}
+	}
+}
+
+// TikTok through an https page that forwards to this computer (a "Web"
+// app): that page is the redirect URI, and there's no PKCE.
+func TestTikTokWebRedirect(t *testing.T) {
+	const page = "https://guidodsalem.github.io/To-Primitive/tiktok/callback.html"
+	t.Setenv("TIKTOK_REDIRECT_URI", page)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600, webRedirect: page}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	env := map[string]string{"TIKTOK_CLIENT_KEY": "key", "TIKTOK_CLIENT_SECRET": "secret"}
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(k string) string { return env[k] }
+	acc.ep = platformEndpoints{TikTokAuth: fake.URL + "/tiktok-auth", TikTokAPI: fake.URL}
+	srv := newServer(t.TempDir(), t.TempDir())
+	srv.acc = acc
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	res, _ := noFollow.Get(ts.URL + "/api/publish/accounts/tiktok/connect")
+	u, _ := url.Parse(res.Header.Get("Location"))
+	q := u.Query()
+	if q.Get("redirect_uri") != page || q.Get("code_challenge") != "" {
+		t.Fatalf("authorize %v", q)
+	}
+	// The page forwards the same query to this server's callback.
+	res, err := noFollow.Get(ts.URL + "/api/publish/oauth/tiktok/callback?code=good-code&scopes=video.publish&state=" + q.Get("state"))
+	if err != nil || res.StatusCode != 302 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("callback: %v %s", res.Status, b)
+	}
+	if st := acc.Status(); !st[1].Connected || st[1].Account != "@shapeitup" {
+		t.Errorf("status %+v", st)
+	}
+	var list []map[string]any
+	r2, _ := http.Get(ts.URL + "/api/publish/accounts")
+	json.NewDecoder(r2.Body).Decode(&list)
+	if list[1]["redirect"] != page {
+		t.Errorf("redirect shown %v", list[1]["redirect"])
+	}
+}
+
+// Publishing by hand goes with what was confirmed in the window.
+func TestPostChoice(t *testing.T) {
+	dir, p, _ := pubFixture(t)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(string) string { return "x" }
+	acc.ep = platformEndpoints{YouTubeAPI: fake.URL, TikTokAPI: fake.URL}
+	for _, id := range platformIDs {
+		acc.tokens[id] = &oauthToken{Access: id + "-access-0", Refresh: "r", Expiry: time.Now().Add(time.Hour)}
+	}
+	p.up = &platformUploader{acc: acc, poll: time.Millisecond, wait: 5 * time.Second}
+	srv := newServer(filepath.Join(dir, "data"), filepath.Join(dir, "reels"))
+	srv.pub, srv.acc = p, acc
+	ts := httptest.NewServer(srv.routes())
+	defer ts.Close()
+
+	// What the window gets.
+	res, _ := http.Get(ts.URL + "/api/publish/queue/" + url.PathEscape("b viejo.mp4") + "/post")
+	var prev struct {
+		TikTok struct {
+			Caption string
+			Creator creatorInfo
+		}
+	}
+	json.NewDecoder(res.Body).Decode(&prev)
+	if prev.TikTok.Creator.Username != "shapeitup" || prev.TikTok.Caption == "" {
+		t.Fatalf("preview %+v", prev)
+	}
+
+	now := func(body string) (int, string) {
+		res, err := http.Post(ts.URL+"/api/publish/queue/"+url.PathEscape("b viejo.mp4")+"/now", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	// A privacy the account doesn't offer: nothing is published.
+	if code, msg := now(`{"platforms":["tiktok"],"tiktok":{"privacy":"PUBLIC_TO_EVERYONE","caption":"x"}}`); code == 200 || !strings.Contains(msg, "no está disponible") {
+		t.Errorf("unavailable privacy: %d %s", code, msg)
+	}
+	if code, msg := now(`{"platforms":["tiktok"],"tiktok":{"privacy":"SELF_ONLY","caption":"x","brandContent":true}}`); code == 200 || !strings.Contains(msg, "privado") {
+		t.Errorf("branded and private: %d %s", code, msg)
+	}
+	code, msg := now(`{"platforms":["youtube","tiktok"],"youtube":{"privacy":"unlisted","title":"Otro título"},
+		"tiktok":{"privacy":"SELF_ONLY","caption":"Mi texto #arte","allowComment":true,"allowDuet":false,"allowStitch":true,"brandOrganic":true}}`)
+	if code != 200 {
+		t.Fatalf("publish: %d %s", code, msg)
+	}
+	post := f.ttInit["post_info"].(map[string]any)
+	if post["title"] != "Mi texto #arte" || post["privacy_level"] != "SELF_ONLY" || post["disable_comment"] != false ||
+		post["disable_duet"] != true || post["disable_stitch"] != false || post["brand_organic_toggle"] != true || post["brand_content_toggle"] != false {
+		t.Errorf("tiktok post_info %v", post)
+	}
+	snip, status := f.ytMeta["snippet"].(map[string]any), f.ytMeta["status"].(map[string]any)
+	if snip["title"] != "Otro título" || status["privacyStatus"] != "unlisted" {
+		t.Errorf("youtube %v %v", snip, status)
+	}
+	// The choice is for that post only: the settings stay as they were.
+	if s := p.Overview().Settings; len(s.Platforms) != 0 || s.YouTubePrivacy != "" {
+		t.Errorf("settings changed: %+v", s)
+	}
+}
+
+func TestTikTokHintOn403(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		fmt.Fprint(w, `{"error":{"code":"unaudited_client_can_only_post_to_private_accounts","message":"Please review our integration guidelines"}}`)
+	}))
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.ep = platformEndpoints{TikTokAPI: fake.URL}
+	err := acc.tiktokCall(context.Background(), "/v2/post/publish/video/init/", "x", map[string]any{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "Cuenta privada") {
+		t.Errorf("error %v", err)
+	}
+}
+
+// A published video sent back to the queue is a new post: it's uploaded
+// again. And a queued one noted as uploaded is uploaded again only if asked.
+func TestRepublish(t *testing.T) {
+	dir, p, _ := pubFixture(t)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(string) string { return "x" }
+	acc.ep = platformEndpoints{YouTubeAPI: fake.URL, TikTokAPI: fake.URL}
+	acc.tokens["youtube"] = &oauthToken{Access: "youtube-access-0", Refresh: "r", Expiry: time.Now().Add(time.Hour)}
+	p.up = &platformUploader{acc: acc, poll: time.Millisecond, wait: time.Second}
+	yt := &PostChoice{Platforms: []string{"youtube"}}
+
+	name, err := p.PublishWith(context.Background(), "b viejo.mp4", "a mano", yt)
+	if err != nil || f.ytUploads != 1 {
+		t.Fatalf("first: %v, %d uploads", err, f.ytUploads)
+	}
+	if err := p.Requeue(name); err != nil {
+		t.Fatal(err)
+	}
+	side := readSidecar(filepath.Join(dir, name))
+	if side["uploads"] != nil || side["previousUploads"] == nil {
+		t.Errorf("requeued sidecar %v", side)
+	}
+	if _, err := p.PublishWith(context.Background(), name, "a mano", yt); err != nil || f.ytUploads != 2 {
+		t.Fatalf("republished: %v, %d uploads", err, f.ytUploads)
+	}
+
+	// Noted as uploaded while still queued (a partial failure): skipped…
+	writeSidecar(filepath.Join(dir, "a medio.mp4"), map[string]any{"uploads": map[string]any{"youtube": map[string]any{"id": "old", "url": "https://youtube.com/shorts/old"}}})
+	if _, err := p.PublishWith(context.Background(), "a medio.mp4", "a mano", yt); err != nil || f.ytUploads != 2 {
+		t.Fatalf("skipped: %v, %d uploads", err, f.ytUploads)
+	}
+	p.Requeue("a medio.mp4")
+	writeSidecar(filepath.Join(dir, "a medio.mp4"), map[string]any{"uploads": map[string]any{"youtube": map[string]any{"id": "old"}}})
+	// …unless asked again.
+	again := &PostChoice{Platforms: []string{"youtube"}, Again: []string{"youtube"}}
+	if _, err := p.PublishWith(context.Background(), "a medio.mp4", "a mano", again); err != nil || f.ytUploads != 3 {
+		t.Fatalf("again: %v, %d uploads", err, f.ytUploads)
+	}
+}
+
+func TestYouTubeHint(t *testing.T) {
+	body := []byte(`{"error":{"code":401,"message":"Unauthorized","errors":[{"message":"Unauthorized","domain":"youtube.header","reason": "youtubeSignupRequired"}]}}`)
+	if err := apiError(401, body); !strings.Contains(err.Error(), "no tiene canal") {
+		t.Errorf("%v", err)
+	}
+}
+
+// The upload reports how much of the video went up, up to all of it.
+func TestUploadProgress(t *testing.T) {
+	dir, _, _ := pubFixture(t)
+	f := &fakePlatforms{t: t, refreshes: map[string]int{}, expiresIn: 3600}
+	fake := httptest.NewServer(f.handler())
+	defer fake.Close()
+	acc := newAccounts(filepath.Join(t.TempDir(), ".cuentas.json"))
+	acc.env = func(string) string { return "x" }
+	acc.ep = platformEndpoints{YouTubeAPI: fake.URL, TikTokAPI: fake.URL}
+	acc.tokens["youtube"] = &oauthToken{Access: "youtube-access-0", Refresh: "r", Expiry: time.Now().Add(time.Hour)}
+	up := &platformUploader{acc: acc, poll: time.Millisecond, wait: time.Second}
+
+	var seen []float64
+	ctx := withProgress(context.Background(), func(f float64) { seen = append(seen, f) })
+	if _, err := up.Upload(ctx, filepath.Join(dir, "b viejo.mp4"), PubItem{Title: "x"}, PublishSettings{Platforms: []string{"youtube"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) == 0 || seen[len(seen)-1] != 1 || !slices.IsSorted(seen) {
+		t.Errorf("progress %v", seen)
+	}
+}

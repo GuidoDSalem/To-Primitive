@@ -4,3 +4,41 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    # Chromium (used by the generator) needs some shared memory.
+    shm_size: "512mb"
+    environment:
+      # Only to show them on the pages.
+      PUBLISH_HOST_DIR: "${PUBLISH_HOST_DIR:-./publicar}"
+      INPUT_HOST_DIR: "${INPUT_HOST_DIR:-./entrada}"
+      GENERATED_HOST_DIR: "${GENERATED_HOST_DIR:-./generados}"
+      AUDIOS_HOST_DIR: "${AUDIOS_HOST_DIR:-./audios}"
+      # Who writes titles, descriptions, tags and translations (see .env.example).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+      CLAUDE_MODEL: "${CLAUDE_MODEL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      # Publishing on YouTube and TikTok (see README, "Publicar en YouTube y TikTok").
+      YOUTUBE_CLIENT_ID: "${YOUTUBE_CLIENT_ID:-}"
+      YOUTUBE_CLIENT_SECRET: "${YOUTUBE_CLIENT_SECRET:-}"
+      TIKTOK_CLIENT_KEY: "${TIKTOK_CLIENT_KEY:-}"
+      TIKTOK_CLIENT_SECRET: "${TIKTOK_CLIENT_SECRET:-}"
+      TIKTOK_REDIRECT_URI: "${TIKTOK_REDIRECT_URI:-}"
+    # Lets the container reach a local model running on this computer
+    # (host.docker.internal works on its own on macOS and Windows).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - reels:/reels
+      # Folders on this computer (set them in .env, see .env.example):
+      # videos to publish (published ones move to publicados/ inside),
+      - "${PUBLISH_HOST_DIR:-./publicar}:/publicar"
+      # photos and videos to turn into reels (done ones move to procesados/),
+      - "${INPUT_HOST_DIR:-./entrada}:/entrada"
+      # and the reels generated from them.
+      - "${GENERATED_HOST_DIR:-./generados}:/generados"
+      # the audio bank, songs to pick from in the reel editor (only read).
+      - "${AUDIOS_HOST_DIR:-./audios}:/audios:ro"
+
+volumes:
+  reels:

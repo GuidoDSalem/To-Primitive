@@ -1,0 +1,102 @@
+/* Reel editor: vertical preview and portion timeline, on top of style.css. */
+
+.sub a { color: var(--accent); }
+
+.reel-stage { display: flex; flex-direction: column; gap: 12px; }
+.phone-box { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; }
+.phone.dragging { outline: 2px dashed var(--accent); outline-offset: 6px; }
+
+/* 9:16, as large as fits; the canvases fill it. */
+.phone {
+  position: relative; aspect-ratio: 9 / 16; height: 100%; max-width: 100%;
+  border-radius: 18px; overflow: hidden; background: #000;
+  box-shadow: 0 0 0 1px var(--line), 0 12px 40px #0008;
+}
+.phone canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#preview { cursor: grab; }
+#preview.panning { cursor: grabbing; }
+#overlay { pointer-events: none; }
+.drop-hint {
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  color: var(--muted); background: var(--bg); border: 2px dashed var(--line); border-radius: 18px;
+}
+
+.reel-bar { display: flex; align-items: center; gap: 10px; height: 36px; }
+.reel-bar #seek { flex: 1; }
+.reel-bar .chips button { padding: 4px 8px; }
+
+/* Portion of the video: two thumbs on one track. */
+.portion { position: relative; height: 28px; }
+.portion-bar { position: absolute; left: 0; right: 0; top: 11px; height: 6px; border-radius: 3px; background: var(--line); }
+.portion-sel { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
+.portion input[type=range] {
+  position: absolute; inset: 0; width: 100%; margin: 0; background: none; pointer-events: none;
+  -webkit-appearance: none; appearance: none;
+}
+.portion input[type=range]::-webkit-slider-thumb {
+  pointer-events: auto; -webkit-appearance: none; width: 14px; height: 22px; border-radius: 4px;
+  background: var(--text); border: 2px solid var(--accent); cursor: ew-resize;
+}
+.portion input[type=range]::-moz-range-thumb {
+  pointer-events: auto; width: 12px; height: 20px; border-radius: 4px;
+  background: var(--text); border: 2px solid var(--accent); cursor: ew-resize;
+}
+.portion input[type=range]::-webkit-slider-runnable-track { background: none; }
+.portion input[type=range]::-moz-range-track { background: none; }
+
+.stale { color: #f2b45c; }
+
+/* Refining a generated version. */
+.refine-bar { margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--accent); background: #6aa8ff1a; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.refine-bar strong { overflow-wrap: anywhere; }
+.refine-bar a { color: var(--accent); }
+
+/* Template cards: a small 9:16 preview each. */
+.tpl-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.tpl { display: flex; flex-direction: column; gap: 4px; padding: 4px; text-align: left; }
+.tpl canvas { display: block; width: 100%; aspect-ratio: 9 / 16; border-radius: 4px; background: var(--bg); }
+.tpl span { font-size: 11px; line-height: 1.2; color: var(--muted); }
+.tpl.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.tpl.on span { color: var(--text); }
+
+/* Library: one row per reel. */
+.library { display: flex; flex-direction: column; gap: 8px; }
+.reel-item { display: flex; gap: 10px; align-items: center; }
+.reel-item video { width: 54px; aspect-ratio: 9 / 16; border-radius: 4px; background: #000; object-fit: cover; flex: none; cursor: pointer; }
+.reel-item .info { flex: 1; min-width: 0; font-size: 12px; }
+.reel-item .info strong { display: block; font-size: 13px; }
+.reel-item .info span { color: var(--muted); }
+.reel-item .actions { display: flex; flex-direction: column; gap: 4px; }
+.reel-item .actions a, .reel-item .actions button { font-size: 11px; padding: 3px 8px; margin: 0; text-align: center; }
+
+textarea, input[type=text] {
+  width: 100%; padding: 6px 8px; border-radius: 6px; resize: vertical;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+}
+
+/* Phrases: one card each. */
+.phrases { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.phrase { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.phrase .meta { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; }
+.phrase .times { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.phrase select, .phrase input[type=number] { width: 100%; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
+.phrase .del { padding: 2px 8px; }
+.phrase .role { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+code { font-size: 11px; color: var(--accent); }
+#testFrames { margin-top: 6px; }
+.silent-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 10px; background: #f2b45c22; border: 1px solid #f2b45c; color: #f2b45c; font-size: 11px; font-weight: 600; vertical-align: middle; }
+.field.presets > label:first-child { display: block; }
+.presets .chips button i { font-style: normal; opacity: .6; padding-left: 2px; }
+.presets .chips button i:hover { opacity: 1; color: #ff8a8a; }
+
+/* Audio bank: the songs of the folder, to listen to and use. */
+.bank > label:first-child { display: block; }
+.bank-list { position: relative; max-height: 220px; overflow-y: auto; margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+.bank-row { display: flex; align-items: center; gap: 6px; border-radius: 6px; }
+.bank-row.on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.bank-row button { border: 0; background: none; color: inherit; padding: 5px 6px; cursor: pointer; text-align: left; }
+.bank-row .listen { flex: none; width: 28px; color: var(--accent); }
+.bank-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.bank-row .name small { color: var(--muted); }
+.bank-row:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.bank-list .reload { position: sticky; bottom: 0; float: right; border: 0; background: var(--panel); color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 6px; }

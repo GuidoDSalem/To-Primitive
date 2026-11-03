@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Primitive · Editor de reels</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 15 8 1l7 14z' fill='%236aa8ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="reels.css">
+</head>
+<body data-busy="beside">
+  <aside id="panel">
+    <header>
+      <h1>Editor de reels</h1>
+      <p class="sub">Foto o video → reel vertical listo para publicar · <a href="/">ir al editor</a> · <a href="generar.html">generar</a> · <a href="revisar.html">revisar</a> · <a href="publicar.html">publicar</a></p>
+      <div id="refineBar" class="refine-bar" hidden>
+        <span id="refineVerb">Refinando</span> <strong id="refineName"></strong>
+        <span id="refineState" class="hint"></span>
+        <div id="refineLangs" class="chips"></div>
+        <span id="refineHint" class="hint">Los cambios valen para todos los idiomas; las frases se escriben en cada uno (cambiá de idioma para verlas y editarlas).</span>
+        <label id="refineQueueBox" class="check"><input id="refineQueue" type="checkbox" checked> Al guardar, mandar todos los idiomas a la cola</label>
+        <a id="refineBack" href="revisar.html">← volver a Revisar</a>
+      </div>
+    </header>
+
+    <section>
+      <h2>1 · Fuente</h2>
+      <label class="button wide">
+        <input id="file" type="file" accept="image/*,video/*" hidden>
+        Subir foto o video…
+      </label>
+      <p id="sourceInfo" class="hint">También podés arrastrarla a la vista previa.</p>
+
+      <div id="portion" hidden>
+        <div class="field">
+          <label>Porción del video <output id="portionOut"></output></label>
+          <div class="portion">
+            <div id="portionBar" class="portion-bar"><div id="portionSel" class="portion-sel"></div></div>
+            <input id="pStart" type="range" min="0" max="1" step="0.05" value="0" aria-label="Inicio">
+            <input id="pEnd" type="range" min="0" max="1" step="0.05" value="1" aria-label="Fin">
+          </div>
+          <p class="hint">Mové los extremos para elegir el inicio y el fin. Máximo 60 s.</p>
+        </div>
+      </div>
+    </section>
+
+    <fieldset id="controls" disabled>
+      <section>
+        <h2>2 · Template</h2>
+        <div id="templates" class="tpl-grid"></div>
+        <p id="tplInfo" class="hint"></p>
+        <div id="presetBox" class="field presets" hidden>
+          <label>Presets de <strong id="presetTpl"></strong></label>
+          <div id="presets" class="chips"></div>
+          <p id="presetStatus" class="hint"></p>
+        </div>
+        <button id="restoreBase" class="wide" hidden>Volver a la configuración base del template</button>
+      </section>
+
+      <section>
+        <h2>3 · Duración</h2>
+        <div id="durPreset" class="chips">
+          <button data-value="10">10 s</button>
+          <button data-value="15" class="on">15 s</button>
+          <button data-value="30">30 s</button>
+          <button data-value="60">60 s</button>
+          <button data-value="free">Libre</button>
+        </div>
+        <div id="durFreeBox" class="field" style="margin-top:10px" hidden>
+          <label for="durFree">Segundos</label>
+          <input id="durFree" type="number" min="3" max="90" step="0.5" value="20">
+        </div>
+        <p id="durInfo" class="hint"></p>
+        <div id="endingBox" class="field" style="margin-top:10px" hidden>
+          <label for="ending">Original al final <output id="endingOut"></output></label>
+          <input id="ending" type="range" min="0" max="10" step="0.5" value="3">
+          <label class="check"><input id="endingAuto" type="checkbox" checked> Usar el de la configuración base del template</label>
+          <p class="hint">Cuántos segundos antes del final empieza a aparecer la foto o el video original. En 0 no se muestra.</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>4 · Encuadre vertical (9:16)</h2>
+        <div id="fitMode" class="chips">
+          <button data-value="fill" class="on">Llenar (recortar)</button>
+          <button data-value="fit">Ajustar (fondo desenfocado)</button>
+        </div>
+        <div id="fillControls">
+          <div class="field" style="margin-top:12px">
+            <label for="zoom">Zoom <output id="zoomOut"></output></label>
+            <input id="zoom" type="range" min="1" max="3" step="0.01" value="1">
+          </div>
+          <div class="row">
+            <div class="field wide">
+              <label for="panX">Horizontal</label>
+              <input id="panX" type="range" min="0" max="1" step="0.001" value="0.5">
+            </div>
+            <div class="field wide">
+              <label for="panY">Vertical</label>
+              <input id="panY" type="range" min="0" max="1" step="0.001" value="0.5">
+            </div>
+          </div>
+          <p class="hint">También podés arrastrar la vista previa para mover el encuadre, y usar la rueda del mouse para el zoom.</p>
+        </div>
+        <label class="check"><input id="safeZones" type="checkbox" checked> Mostrar zonas que tapan las apps</label>
+      </section>
+
+      <section>
+        <h2>5 · Formas</h2>
+        <div class="field">
+          <label for="shapes">Cantidad <output id="shapesOut"></output></label>
+          <input id="shapes" type="range" min="10" max="2500" step="10" value="150">
+        </div>
+        <div class="field">
+          <label>Tipo</label>
+          <div id="mode" class="chips">
+            <button data-value="1" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 21 20H3z"/></svg>Triángulo</button>
+            <button data-value="2"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12"/></svg>Rectángulo</button>
+            <button data-value="5"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="10" transform="rotate(-25 12 12)"/></svg>Rect. rotado</button>
+            <button data-value="3"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="6"/></svg>Elipse</button>
+            <button data-value="7"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/></svg>Elipse rotada</button>
+            <button data-value="4"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>Círculo</button>
+            <button data-value="6"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18Q12 -2 21 16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>Bézier</button>
+            <button data-value="8"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9 11 3l9 5-2 11-10 2z"/></svg>Polígono</button>
+            <button data-value="0"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20 9 9l6 11z"/><circle cx="17" cy="8" r="5"/></svg>Combinado</button>
+          </div>
+        </div>
+        <div id="testFrameBox" class="field" hidden>
+          <label for="testFrame">Frame de prueba <output id="testFrameOut"></output></label>
+          <input id="testFrame" type="range" min="0" max="1" step="0.01" value="0">
+          <button id="addTestFrame" type="button" class="wide">Agregar este frame</button>
+          <div id="testFrames" class="frames"></div>
+          <p class="hint">Ajustá todo sobre algunos frames del tramo (cada uno sigue donde lo dejaste) y después calculá el video completo.</p>
+        </div>
+        <div class="row">
+          <button id="pause" class="wide">Pausar</button>
+        </div>
+        <p id="liveStatus" class="hint"></p>
+      </section>
+
+      <section>
+        <h2>6 · Algoritmo</h2>
+        <div class="field">
+          <label for="alpha">Opacidad <output id="alphaOut"></output></label>
+          <input id="alpha" type="range" min="1" max="255" value="128">
+          <label class="check"><input id="alphaAuto" type="checkbox"> Automática (por forma)</label>
+        </div>
+        <div class="field">
+          <label for="repeat">Repetición <output id="repeatOut"></output></label>
+          <input id="repeat" type="range" min="0" max="10" value="0">
+          <p class="hint">Formas extra por iteración con búsqueda reducida.</p>
+        </div>
+        <div class="field">
+          <label for="inputSize">Resolución de trabajo <output id="inputSizeOut"></output></label>
+          <input id="inputSize" type="range" min="64" max="512" step="16" value="256">
+          <p class="hint">Más alta = más detalle, pero más lento. La salida siempre es 1080×1920.</p>
+        </div>
+        <div class="field">
+          <label for="background">Fondo</label>
+          <div class="row">
+            <input id="background" type="color" value="#000000">
+            <label class="check"><input id="bgAuto" type="checkbox" checked> Color promedio</label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>7 · Animación</h2>
+        <div id="photoAnim">
+          <div class="field">
+            <label for="recOrder">Orden de aparición</label>
+            <select id="recOrder"></select>
+          </div>
+          <div class="field">
+            <label for="recCurve">Velocidad (curva de easing)</label>
+            <div id="curveView" class="chips curve-view">
+              <button type="button" data-value="curve">Curva</button>
+              <button type="button" data-value="result">Resultado</button>
+            </div>
+            <select id="recCurve"></select>
+            <p class="hint">Solo en Revelado: el loop sigue su propio ritmo para empalmar.</p>
+          </div>
+          <div class="field">
+            <label for="recEffect">Efecto de aparición</label>
+            <select id="recEffect"></select>
+          </div>
+          <div class="field">
+            <label for="recEffectTime">Duración del efecto <output id="recEffectTimeOut"></output></label>
+            <input id="recEffectTime" type="range" min="0.05" max="3" step="0.05" value="0.6">
+          </div>
+          <p class="hint">Se aplica al instante, sin recalcular.</p>
+        </div>
+        <div id="videoAnim" hidden>
+          <div class="field">
+            <label for="kfps">Keyframes por segundo</label>
+            <select id="kfps"></select>
+            <p class="hint">Cuántos frames del video se calculan; el movimiento entre ellos se interpola. Menos = más rápido de calcular.</p>
+          </div>
+          <div class="field">
+            <label for="adapt">Seguimiento del movimiento <output id="adaptOut"></output></label>
+            <input id="adapt" type="range" min="0" max="300" step="10" value="60">
+            <label class="check"><input id="videoFlow" type="checkbox" checked> Flujo óptico (las formas siguen el movimiento)</label>
+            <p class="hint">Cada keyframe parte de las formas del anterior. Más alto = las formas siguen mejor el movimiento; 0 = quedan fijas y solo cambian de color.</p>
+          </div>
+          <div class="field">
+            <label for="interp">Interpolación</label>
+            <select id="interp">
+              <option value="smooth">Suave (curva continua)</option>
+              <option value="linear">Lineal</option>
+              <option value="step">Sin interpolar (saltos)</option>
+            </select>
+            <p class="hint">Se aplica al instante, sin recalcular.</p>
+          </div>
+          <button id="generate" class="wide primary">Calcular el video</button>
+          <progress id="genProgress" max="1" value="0" hidden></progress>
+          <p id="genStatus" class="hint"></p>
+        </div>
+      </section>
+
+      <section>
+        <h2>8 · Frases</h2>
+        <div id="phrases" class="phrases"></div>
+        <button id="addPhrase" class="wide">＋ Agregar frase</button>
+        <p class="hint">Aparecen y desaparecen con un fundido, siempre fuera de las zonas que tapan las apps. Los tiempos se ajustan solos si cambia la duración. Podés usar <code>{formas}</code> (cantidad) y <code>{tipo}</code> (triángulos, círculos…).</p>
+        <div class="field" style="margin-top:12px">
+          <label for="tBrand">Marca (todo el reel)</label>
+          <input id="tBrand" type="text" placeholder="@tucuenta">
+        </div>
+      </section>
+
+      <section>
+        <h2>9 · Audio</h2>
+        <div id="audioMode" class="chips">
+          <button data-value="none" class="on">Sin sonido</button>
+          <button data-value="source">Sonido del video</button>
+          <button data-value="file">Archivo propio</button>
+        </div>
+        <div id="audioFileBox" style="margin-top:10px" hidden>
+          <div class="field bank">
+            <label for="bankSearch">Banco de audios <span id="bankCount" class="kinds"></span></label>
+            <input id="bankSearch" type="search" placeholder="Buscar en el banco…">
+            <div id="bankList" class="bank-list"></div>
+            <p id="bankInfo" class="hint"></p>
+          </div>
+          <label class="button wide">
+            <input id="audioFile" type="file" accept="audio/*,video/*" hidden>
+            Elegir otro archivo…
+          </label>
+          <p id="audioName" class="hint">Ningún archivo elegido.</p>
+          <div class="field" style="margin-top:10px">
+            <label for="audioStart">Empieza en (segundos del audio)</label>
+            <input id="audioStart" type="number" min="0" step="0.5" value="0">
+          </div>
+        </div>
+        <div id="audioLevels" style="margin-top:10px" hidden>
+          <div class="field">
+            <label for="volume">Volumen <output id="volumeOut"></output></label>
+            <input id="volume" type="range" min="0" max="2" step="0.05" value="1">
+          </div>
+          <div class="field">
+            <label for="fadeOut">Fundido de salida <output id="fadeOutOut"></output></label>
+            <input id="fadeOut" type="range" min="0" max="5" step="0.1" value="1.5">
+          </div>
+          <p class="hint">Se escucha al reproducir el reel. Se corta a la duración del reel; si es más corto, sigue en silencio.</p>
+        </div>
+        <audio id="audioPreview" preload="auto" hidden></audio>
+      </section>
+
+      <section>
+        <h2>10 · Escena final de marca</h2>
+        <div id="outroKind" class="chips">
+          <button data-value="none" class="on">Ninguna</button>
+          <button data-value="cta">Frase (CTA)</button>
+          <button data-value="logo">Logo</button>
+          <button data-value="handle">@cuenta</button>
+        </div>
+        <p class="hint">Una escena corta después del template, en cualquiera de ellos. Se guarda con el reel y con los presets.</p>
+        <div id="outroBox" hidden>
+          <div class="field" style="margin-top:10px">
+            <label for="outroSeconds">Duración <output id="outroSecondsOut"></output></label>
+            <input id="outroSeconds" type="range" min="1" max="6" step="0.5" value="2.5">
+          </div>
+          <div id="outroCtaBox" class="field">
+            <label for="outroText">Frase</label>
+            <input id="outroText" type="text" placeholder="Seguime para ver más">
+            <p class="hint">Vacía: "Seguime para ver más" en el idioma de cada reel.</p>
+          </div>
+          <div id="outroHandleBox" class="field">
+            <label for="outroHandle">Cuenta</label>
+            <input id="outroHandle" type="text" placeholder="@tucuenta">
+            <p class="hint">Vacía: la marca de la sección Frases.</p>
+          </div>
+          <div id="outroLogoBox">
+            <label class="button wide">
+              <input id="outroLogoFile" type="file" accept="image/*" hidden>
+              Elegir logo…
+            </label>
+            <div class="field" style="margin-top:10px">
+              <label for="outroBg">Fondo</label>
+              <input id="outroBg" type="color" value="#111111">
+            </div>
+            <div class="field">
+              <label for="outroLogoShapes">Formas del logo <output id="outroLogoShapesOut"></output></label>
+              <input id="outroLogoShapes" type="range" min="30" max="400" step="10" value="150">
+            </div>
+            <p id="outroLogoStatus" class="hint">El logo se arma con formas, como los reels (con el tipo de forma de la sección Formas).</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>11 · Exportar</h2>
+        <button id="export" class="wide primary">Exportar reel (MP4 1080×1920)</button>
+        <progress id="expProgress" max="1" value="0" hidden></progress>
+        <p id="expStatus" class="hint">Se descarga y queda en la biblioteca, con el registro de template, duración y ajustes.</p>
+        <button id="savePreset" class="wide" type="button">Guardar como preset…</button>
+        <p class="hint">Guarda los ajustes actuales (formas, animación, duración, original al final, frases, marca, canción y escena final) como un preset del template elegido, para usarlos con otras fotos o videos.</p>
+      </section>
+    </fieldset>
+
+    <section>
+      <h2>Biblioteca</h2>
+      <div id="library" class="library"><p class="hint">Cargando…</p></div>
+    </section>
+
+    <footer id="stats">Sin fuente</footer>
+  </aside>
+
+  <main id="stage" class="reel-stage">
+    <div id="phoneBox" class="phone-box">
+      <div id="phone" class="phone">
+        <canvas id="preview" width="540" height="960"></canvas>
+        <canvas id="overlay" width="540" height="960"></canvas>
+        <div id="dropHint" class="drop-hint"><p><strong>Arrastrá una foto o un video</strong><br>o usá “Subir foto o video…”</p></div>
+      </div>
+    </div>
+    <div id="reelBar" class="reel-bar">
+      <button id="play" title="Reproducir / pausar (barra espaciadora)">▶</button>
+      <input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+      <span id="clock">0:00.0 / 0:00.0</span>
+      <div id="viewMode" class="chips">
+        <button data-value="reel" disabled>Reel</button>
+        <button data-value="shapes" class="on">Formas</button>
+        <button data-value="original">Original</button>
+      </div>
+    </div>
+    <video id="srcVideo" muted playsinline preload="auto" hidden></video>
+  </main>
+
+  <script src="busy.js"></script>
+  <script src="mp4.js"></script>
+  <script src="motion.js"></script>
+  <script src="build.js"></script>
+  <script src="templates.js"></script>
+  <script src="picker.js"></script>
+  <script src="reels.js"></script>
+</body>
+</html>

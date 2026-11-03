@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -31,6 +32,12 @@ type ComputeOpts struct {
 	KFPS  float64 `json:"kfps"`  // keyframes per second
 	Adapt int     `json:"adapt"` // hill-climb steps per carried-over shape
 	Flow  bool    `json:"flow"`  // move shapes with the optical flow first
+
+	// Optional portion and framing of the video: start and length in
+	// seconds (length 0 = to the end) and a crop of the frame.
+	Start  float64 `json:"start"`
+	Length float64 `json:"length"`
+	Crop   *Crop   `json:"crop,omitempty"`
 }
 
 func (o *ComputeOpts) clamp(info videoInfo) {
@@ -40,6 +47,13 @@ func (o *ComputeOpts) clamp(info videoInfo) {
 	}
 	o.KFPS = min(o.KFPS, info.FPS, 60)
 	o.Adapt = clampInt(o.Adapt, 0, 2000)
+	o.Start = clamp(o.Start, 0, max(0, info.Duration-0.1))
+	if rest := info.Duration - o.Start; o.Length <= 0 || o.Length > rest {
+		o.Length = rest
+	}
+	if !o.Crop.valid() {
+		o.Crop = nil
+	}
 }
 
 type job struct {
@@ -63,6 +77,8 @@ type Animation struct {
 	Background string        `json:"background"`
 	KFPS       float64       `json:"kfps"`
 	Duration   float64       `json:"duration"`
+	Start      float64       `json:"start"`          // where the portion starts in the source video
+	Crop       *Crop         `json:"crop,omitempty"` // framing applied to the source
 	Keyframes  [][][]float64 `json:"keyframes"`
 }
 
@@ -98,7 +114,7 @@ func (v *Video) StartCompute(o ComputeOpts) error {
 		return errors.New("a computation is already running")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	total := max(1, int(math.Round(v.info.Duration*o.KFPS)))
+	total := max(1, int(math.Round(o.Length*o.KFPS)))
 	v.job = &job{State: "running", Total: total, started: time.Now(), cancel: cancel}
 	v.anim = nil
 	v.hub.broadcast("job", v.job)
@@ -134,7 +150,7 @@ func (v *Video) compute(ctx context.Context, j *job, o ComputeOpts) {
 
 func (v *Video) computeKeyframes(ctx context.Context, j *job, o ComputeOpts) error {
 	// Working-size dimensions, from a frame decoded with the same scaling.
-	first, err := extractFrame(ctx, v.path, 0, o.InputSize)
+	first, err := extractCroppedFrame(ctx, v.path, o.Start, o.Crop, o.InputSize)
 	if err != nil {
 		return err
 	}
@@ -149,15 +165,16 @@ func (v *Video) computeKeyframes(ctx context.Context, j *job, o ComputeOpts) err
 	anim := &Animation{
 		Width: w, Height: h,
 		Background: fmt.Sprintf("#%02x%02x%02x", bg.R, bg.G, bg.B),
-		KFPS:       o.KFPS, Duration: v.info.Duration,
+		KFPS:       o.KFPS, Duration: o.Length, Start: o.Start, Crop: o.Crop,
 	}
 	v.mu.Lock()
 	v.anim = anim
 	v.hub.broadcast("animation", anim)
 	v.mu.Unlock()
 
-	dec := exec.CommandContext(ctx, "ffmpeg", "-v", "error", "-i", v.path,
-		"-vf", fmt.Sprintf("fps=%g,%s", o.KFPS, fitFilter(o.InputSize)),
+	dec := exec.CommandContext(ctx, "ffmpeg", "-v", "error",
+		"-ss", strconv.FormatFloat(o.Start, 'f', 3, 64), "-t", strconv.FormatFloat(o.Length, 'f', 3, 64), "-i", v.path,
+		"-vf", chain(o.Crop.filter(), fmt.Sprintf("fps=%g", o.KFPS), fitFilter(o.InputSize)),
 		"-f", "rawvideo", "-pix_fmt", "rgba", "-")
 	var decErr bytes.Buffer
 	dec.Stderr = &decErr

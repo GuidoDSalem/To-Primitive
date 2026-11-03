@@ -44,6 +44,12 @@ var numWorkers = runtime.NumCPU()
 
 type server struct {
 	dataDir string
+	lib     *library
+	pub     *publisher // nil: publishing not configured
+	gen     *generator // nil: automatic generation not configured
+	acc     *accounts  // connected YouTube / TikTok accounts
+	presets *presetStore
+	audios  string // the audio bank's folder (audios.go)
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -51,14 +57,23 @@ type server struct {
 	lives    map[string]*LiveSession
 }
 
-func newServer(dataDir string) *server {
-	return &server{dataDir: dataDir, sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
+func newServer(dataDir, reelsDir string) *server {
+	return &server{dataDir: dataDir, lib: &library{dir: reelsDir}, presets: newPresetStore(filepath.Join(reelsDir, ".presets.json")),
+		sessions: map[string]*Session{}, videos: map[string]*Video{}, lives: map[string]*LiveSession{}}
 }
 
-// routes returns the API handlers; the native server adds the static files.
-func (srv *server) routes() *http.ServeMux {
+func (srv *server) routes() http.Handler {
+	if srv.pub != nil {
+		srv.pub.editable = func(side map[string]any) bool {
+			_, err := srv.queuedSource(side)
+			return err == nil
+		}
+	}
 	mux := http.NewServeMux()
+	srv.static(mux) // the pages (natively; the browser demo has its own)
 	mux.HandleFunc("POST /api/sessions", srv.create)
+	mux.HandleFunc("GET /api/audios", srv.audioList)
+	mux.HandleFunc("GET /api/audios/files/{name...}", srv.audioFile)
 	mux.HandleFunc("GET /api/sessions/{id}/events", srv.withSession(srv.events))
 	mux.HandleFunc("PUT /api/sessions/{id}/params", srv.withSession(srv.params))
 	mux.HandleFunc("GET /api/sessions/{id}/export", srv.withSession(srv.export))
@@ -78,6 +93,67 @@ func (srv *server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/live/{id}/frame", srv.withLive(srv.liveFrame))
 	mux.HandleFunc("PUT /api/live/{id}/params", srv.withLive(srv.liveParams))
 	mux.HandleFunc("DELETE /api/live/{id}", srv.withLive(srv.closeLive))
+
+	mux.HandleFunc("POST /api/reels/mux", srv.reelMux)
+	mux.HandleFunc("POST /api/reels", srv.reelSave)
+	mux.HandleFunc("GET /api/reels", srv.reelList)
+	mux.HandleFunc("GET /api/reels/{id}/video", srv.reelVideo)
+	mux.HandleFunc("DELETE /api/reels/{id}", srv.reelDelete)
+	mux.HandleFunc("POST /api/reels/{id}/queue", srv.withPublisher(srv.reelQueue))
+	mux.HandleFunc("GET /api/reels/{id}/spec", srv.reelSpec)
+	mux.HandleFunc("GET /api/reels/{id}/source", srv.reelSource)
+	mux.HandleFunc("GET /api/reels/files/{hash}/{name}", srv.reelFile)
+	mux.HandleFunc("GET /api/presets", srv.presetList)
+	mux.HandleFunc("POST /api/presets", srv.presetAdd)
+	mux.HandleFunc("DELETE /api/presets/{id}", srv.presetDelete)
+
+	mux.HandleFunc("GET /api/publish", srv.withPublisher(srv.pubOverview))
+	mux.HandleFunc("PUT /api/publish/settings", srv.withPublisher(srv.pubSettings))
+	mux.HandleFunc("PUT /api/publish/order", srv.withPublisher(srv.pubOrder))
+	mux.HandleFunc("PUT /api/publish/queue/{name}/meta", srv.withPublisher(srv.pubMeta))
+	mux.HandleFunc("POST /api/publish/queue/{name}/skip", srv.withPublisher(srv.pubSkip))
+	mux.HandleFunc("POST /api/publish/queue/{name}/now", srv.withPublisher(srv.pubNow))
+	mux.HandleFunc("GET /api/publish/queue/{name}/video", srv.withPublisher(srv.pubVideo("")))
+	mux.HandleFunc("POST /api/publish/published/{name}/requeue", srv.withPublisher(srv.pubRequeue))
+	mux.HandleFunc("POST /api/publish/queue/{name}/duplicate", srv.withPublisher(srv.pubDuplicate))
+	mux.HandleFunc("GET /api/publish/accounts", srv.withAccounts(srv.accountsOverview))
+	mux.HandleFunc("GET /api/publish/queue/{name}/post", srv.withPublisher(srv.postPreview))
+	mux.HandleFunc("GET /api/publish/accounts/{platform}/connect", srv.withAccounts(srv.accountConnect))
+	mux.HandleFunc("POST /api/publish/accounts/{platform}/disconnect", srv.withAccounts(srv.accountDisconnect))
+	mux.HandleFunc("GET /api/publish/oauth/{platform}/callback", srv.withAccounts(srv.accountCallback))
+	mux.HandleFunc("POST /api/publish/queue/{name}/discard", srv.withPublisher(srv.pubAction((*publisher).Discard)))
+	mux.HandleFunc("POST /api/publish/discarded/{name}/restore", srv.withPublisher(srv.pubAction((*publisher).Undiscard)))
+	mux.HandleFunc("GET /api/publish/discarded/{name}/video", srv.withPublisher(srv.pubVideo(discardedDir)))
+	mux.HandleFunc("GET /api/publish/queue/{name}/spec", srv.withPublisher(srv.pubSpec))
+	mux.HandleFunc("GET /api/publish/queue/{name}/source", srv.withPublisher(srv.pubSource))
+	mux.HandleFunc("GET /api/publish/copies", srv.withPublisher(srv.pubCopies))
+	mux.HandleFunc("GET /api/publish/published/{name}/video", srv.withPublisher(srv.pubVideo(publishedDir)))
+
+	mux.HandleFunc("GET /api/auto", srv.withGenerator(srv.genOverview))
+	mux.HandleFunc("PUT /api/auto/settings", srv.withGenerator(srv.genSettings))
+	mux.HandleFunc("POST /api/auto/inputs", srv.withGenerator(srv.genUpload))
+	mux.HandleFunc("GET /api/auto/inputs/{name}", srv.withGenerator(srv.genInput))
+	mux.HandleFunc("GET /api/auto/inputs/{name}/spec", srv.withGenerator(srv.genInputSpec))
+	mux.HandleFunc("POST /api/auto/inputs/{name}/start", srv.withGenerator(srv.genStart))
+	mux.HandleFunc("POST /api/auto/inputs/{name}/dismiss", srv.withGenerator(srv.genDismiss))
+	mux.HandleFunc("GET /api/auto/jobs/{id}", srv.withGenerator(srv.genJob))
+	mux.HandleFunc("GET /api/auto/jobs/{id}/source", srv.withGenerator(srv.genSource))
+	mux.HandleFunc("POST /api/auto/jobs/{id}/progress", srv.withGenerator(srv.genProgress))
+	mux.HandleFunc("POST /api/auto/jobs/{id}/fail", srv.withGenerator(srv.genFail))
+	mux.HandleFunc("POST /api/auto/jobs/{id}/retry", srv.withGenerator(srv.genRetry))
+	mux.HandleFunc("GET /api/auto/outputs/{name}/video", srv.withGenerator(srv.genVideo))
+	mux.HandleFunc("POST /api/auto/outputs/{name}/queue", srv.withGenerator(srv.genToQueue))
+	mux.HandleFunc("DELETE /api/auto/outputs/{name}", srv.withGenerator(srv.genDelete))
+
+	mux.HandleFunc("GET /api/review", srv.withGenerator(srv.reviewOverview))
+	mux.HandleFunc("POST /api/review/{name}/choose", srv.withGenerator(srv.reviewAction((*generator).Choose)))
+	mux.HandleFunc("POST /api/review/{name}/discard", srv.withGenerator(srv.reviewAction((*generator).Discard)))
+	mux.HandleFunc("POST /api/review/{name}/restore", srv.withGenerator(srv.reviewAction((*generator).Restore)))
+	mux.HandleFunc("PUT /api/review/{name}/meta", srv.withGenerator(srv.reviewMeta))
+	mux.HandleFunc("GET /api/review/{name}/spec", srv.withGenerator(srv.reviewSpec))
+	mux.HandleFunc("GET /api/review/{name}/source", srv.withGenerator(srv.reviewSource))
+	mux.HandleFunc("GET /api/review/discarded/{name}/video", srv.withGenerator(srv.reviewDiscardedVideo))
+	mux.HandleFunc("POST /api/review/{name}/queue", srv.withGenerator(srv.reviewQueue))
 	return mux
 }
 
@@ -325,12 +401,16 @@ func (srv *server) frameSession(w http.ResponseWriter, r *http.Request, v *Video
 	var body struct {
 		T      float64 `json:"t"`
 		Params *Params `json:"params"`
+		Crop   *Crop   `json:"crop"` // optional framing, as in compute
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	img, err := extractFrame(r.Context(), v.path, body.T, maxFrameSize)
+	if !body.Crop.valid() {
+		body.Crop = nil
+	}
+	img, err := extractCroppedFrame(r.Context(), v.path, body.T, body.Crop, maxFrameSize)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return

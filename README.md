@@ -40,6 +40,7 @@ go test ./...
   - **PNG** al tamaño que elijas.
   - **SVG** vectorial.
   - **GIF** animado del proceso.
+- **Progreso a la vista**: mientras se procesa algo, en cualquier página aparece arriba a la izquierda una dona que se va completando, con el porcentaje en el centro y, al costado, cuánto falta más o menos (según el ritmo del último medio minuto; aparece después de unos segundos de avance). En el editor de reels va entre la configuración y el reel, arriba, quieta aunque scrollees los ajustes. Sigue el cálculo de formas o keyframes, la grabación y la exportación de videos, las fotos y videos que se suben, las versiones que se generan (en Generar, Revisar y Publicar) y la subida a YouTube y TikTok. Si hay varias cosas a la vez, muestra el promedio; al pasar el mouse dice qué está procesando. Cuando algo no tiene porcentaje, gira sin número.
 
 ## Grabar la construcción de una imagen
 
@@ -144,6 +145,168 @@ En el navegador, con cámara simulada en Chrome:
 - 100 formas a 128 px: ~11 keyframes/s, con ~200 ms de retraso en pantalla.
 - 50 formas: ~16 keyframes/s, con ~140 ms de retraso.
 
+## Editor de reels
+
+`/reels.html` (enlace "editor de reels" arriba del panel) arma un reel vertical a partir de una foto o un tramo de video.
+
+1. **Fuente.** Subí o arrastrá una foto o un video. En los videos elegís la porción con los dos extremos de la barra: hasta 60 s, como mínimo 0,5 s.
+2. **Template.** Cada tarjeta muestra el reel animado con tus formas y tus textos. Sus tiempos son proporcionales a la duración.
+
+   | Template | Fuente | Qué hace |
+   |---|---|---|
+   | **Revelado** | Foto | Las formas arman la imagen, se sostienen y hacen un fundido a la foto real. El cierre aparece al final. |
+   | **Loop hipnótico** | Foto o video | La foto se simplifica hasta las formas grandes y se vuelve a armar, con un zoom que respira; el video va y vuelve. El último cuadro es idéntico al primero, así la repetición automática de las apps no tiene corte. |
+   | **Video en formas** | Video | La porción en formas y, en el tramo final, un fundido al video original. |
+   | **¿En qué nivel?** | Foto o video | Se completa de a niveles (10, 25, 50, 100… formas, hasta cinco niveles y luego todas), cada uno sostenido con su etiqueta "Nivel {nivel} · {formas} formas", y al final aparece el original. Pregunta y cierre invitan a comentar en qué nivel la adivinaste. En video, cada nivel muestra un tramo con esa cantidad de formas |
+   | **Comparativa** | Foto o video | Arriba el original, abajo las formas armándose, con una línea entre los dos. Cada mitad es un recorte 9:8, así que las formas se calculan sobre ese recorte |
+   | **Cortina** | Foto o video | Una línea va y viene: a un lado el original, al otro las formas. Es periódica, así que también empalma |
+   | **Contador** | Foto | Las formas se suman con un contador grande ("{n} {tipo}") y al final aparece la foto |
+   | **Mosaico de niveles** | Foto o video | Grilla 2×2 con cada vez más formas (por ejemplo 10, 50, 100 y 500), los cuadros aparecen uno tras otro y al final todo pasa al original. Sale de un solo cálculo: cada cuadro usa las primeras N formas |
+   | **¿Cuál preferís?** | Foto | La misma foto con cuatro tipos de forma (triángulos, círculos, rectángulos y polígonos) armándose a la vez, numerados para que comenten. Cada tipo es un cálculo propio: mientras este template está elegido corren tres sesiones extra (la del tipo elegido en los controles se reutiliza), y el estado muestra cuántas están listas |
+   | **Contador y cortina** | Foto o video | Las formas se suman con un contador grande; cuando la imagen está completa, una cortina entra desde el borde y va y viene comparándola con el original. En un video, el contador arma su primer cuadro y durante la cortina el video corre (formas de un lado, original del otro) |
+   | **Contador y video** | Video | Un contador arma con formas el primer cuadro del video; cuando está completo, el video arranca con las formas en movimiento, y al final aparece el original |
+   | **Tapado** | Foto o video | Empieza con el original y las formas lo van tapando una a una mientras el original se apaga debajo, hasta que solo quedan las formas |
+   | **¿Qué es?** | Foto o video | Pensado para retener: arranca con un zoom extremo al detalle más rico y se aleja a golpes (cada golpe con un destello y más formas), con "Pista 1 de 5", una barra de tiempo que se vacía y la pregunta arriba, hasta revelar el original |
+   | **3, 2, 1** | Foto | Cuenta regresiva grande: con cada número entra una ráfaga de formas y un golpe de zoom; en "¡Ya!" aparece la foto con un destello, se mueve despacio y al final vuelve al primer cuadro para verse en loop |
+   | **Similitud %** | Foto | Un porcentaje real de parecido (el del algoritmo) sube con una barra mientras se arma; en cada hito redondo el número salta, se pone dorado y hay un golpe de zoom; al final, el original |
+   | **Lupa** | Foto o video | Una lupa recorre los tres lugares con más detalle mostrando el original debajo de las formas (siempre hay un punto donde mirar); al final se abre a todo el cuadro y se vuelve a cerrar, para el loop |
+
+   *Automático* elige Revelado para fotos y Video en formas para videos.
+
+   Cada template tiene su **configuración base** (duración, cantidad y tipo de formas, animación y frases), que se carga al elegirlo. Lo que cambiaste a mano se respeta al pasar de un template a otro, y *Volver a la configuración base del template* lo restaura todo (los textos escritos se mantienen). Revelado y Video en formas arrancan en 15 s; el Loop, en 10 s.
+3. **Duración.** Atajos de 10, 15, 30 y 60 s, o libre (3 a 90 s). En los videos fija el largo de la porción (la mitad en el loop, que va y vuelve). Si elegís la porción a mano, pasa a ser libre.
+4. **Encuadre 9:16.**
+   - *Llenar* recorta: zoom, posición, y también arrastrar la vista previa o usar la rueda del mouse.
+   - *Ajustar* muestra la fuente completa sobre una copia desenfocada.
+   - Las zonas rojas marcan lo que tapan TikTok, Reels y Shorts (barra superior, texto de la cuenta, botones). Conviene dejar lo importante fuera de ellas.
+5. **Formas, en vivo como en el editor.** Cantidad y tipo; las formas aparecen en la vista previa mientras se buscan y cada cambio se ve al instante, igual que en el editor principal (con *Pausar / Continuar*).
+   - Fotos: la sesión trabaja sobre la foto ya recortada a 9:16, así las formas cubren justo el cuadro. Cuando están todas, el reel las usa solo; si cambiás algo, se buscan de nuevo y el reel se actualiza al terminar.
+   - Videos: se ajusta sobre **frames de prueba** del tramo (también recortados), como en el editor: con el deslizador elegís un momento y con **Agregar este frame** lo guardás en la lista. Cada frame tiene su propia sesión; al pasar a otro, el anterior se pausa y, al volver, sigue con las formas donde estaban. Los frames de prueba se guardan con el reel.
+6. **Algoritmo.** Los mismos controles que el editor: opacidad (fija o automática por forma), repetición, resolución de trabajo y fondo (color promedio o elegido).
+7. **Animación.**
+   - Fotos: las opciones de la grabación del editor, con sus tarjetas animadas: orden de aparición, velocidad (curva de easing, en Revelado), efecto y duración del efecto. Se aplican al instante, sin recalcular.
+   - Videos: keyframes por segundo, seguimiento del movimiento, flujo óptico e interpolación. *Calcular el video* procesa el tramo con el recorte elegido (pausa la sesión de prueba para liberar la CPU); si después cambiás algo que afecta el cálculo, avisa que hay que calcular de nuevo. La interpolación se aplica al instante.
+8. **Frases.** Las del template vienen cargadas (en los actuales, título y cierre) y se pueden agregar más. Cada una tiene texto, posición (arriba, centro, abajo), estilo (título, subtítulo, pregunta o etiqueta con fondo) y desde/hasta en segundos, que se reajustan solos si cambia la duración. Aparecen con un fundido y un leve movimiento, con sombra, y quedan fuera de las zonas que tapan las apps; si no entran, se achican. Pueden usar `{formas}` y `{tipo}` ("La Mona Lisa con {formas} {tipo}" → "La Mona Lisa con 150 triángulos"); algunos templates suman las suyas: `{nivel}` y `{niveles}` (¿En qué nivel?, donde `{formas}` es la cantidad del nivel) y `{n}` (Contador: las formas que van apareciendo). Posiciones: arriba, mitad (debajo de la línea de la comparativa), centro, abajo y al pie; estilos: título, subtítulo, pregunta, etiqueta y contador. La **marca** se ve durante todo el reel.
+9. **Audio.** Sin sonido, el sonido del video (el tramo elegido) o un archivo propio, desde el segundo que elijas. Con volumen y fundido de salida. Se escucha al reproducir la vista previa.
+   - **Banco de audios:** en *Archivo propio* aparece la lista de canciones de la carpeta del banco (`AUDIOS_HOST_DIR` en el `.env`, montada en `/audios` solo para leer; también subcarpetas). ▶ la escucha, tocar el nombre la usa en el reel, y el buscador filtra cuando hay muchas; ↻ vuelve a leer la carpeta. La canción elegida se guarda con el reel y con el preset que guardes desde él ("Guardar como preset…"), así que aplicar el preset, en el editor o en Generar, la trae de vuelta aunque después la saques de la carpeta.
+10. **Escena final de marca.** Opcional, en cualquier template: una escena corta (1 a 6 s, por defecto 2,5) que se agrega después del final del template. Las frases del template siguen con sus tiempos y la escena va aparte.
+   - **Frase (CTA):** el último cuadro se oscurece y aparece la frase. Vacía, dice "Seguime para ver más" en el idioma de cada reel; un texto propio queda igual en todos los idiomas.
+   - **Logo:** "Elegir logo…" lo arma con formas (del tipo elegido en Formas, con la cantidad que elijas) sobre un color de fondo, que también rellena sus partes transparentes. La escena pasa a ese color y el logo se construye en el centro. El logo va con el reel y con los presets (una copia chica y sus formas), así que no se vuelve a calcular.
+   - **@cuenta:** la cuenta grande en el centro, sobre el último cuadro oscurecido. Vacía, usa la marca de la sección Frases.
+   - Se guarda con el reel y con "Guardar como preset…": aplicar el preset, en el editor o en Generar, la trae de vuelta. Para comparar qué funciona mejor, guardá un preset con cada una.
+
+11. **Exportar.** El navegador dibuja cada cuadro a 1080×1920 y 30 fps y lo codifica en H.264 (WebCodecs); el servidor le agrega el audio en AAC (recortado a la duración del reel, rellenado con silencio si es más corto y con el fundido) y lo guarda en la biblioteca. El MP4 se descarga solo y está listo para subir a TikTok, Reels o Shorts. Si el navegador solo puede codificar VP9, el servidor lo convierte a H.264.
+
+**Biblioteca.** Al pie del panel están los reels exportados, del más nuevo al más viejo, para verlos, descargarlos, **editarlos** o borrarlos. **Editar** vuelve a abrir el reel con todos sus ajustes (el reel guarda una copia de su foto o video de origen en `sources/`, compartida entre los reels hechos de la misma fuente) y al guardar lo reemplaza en la biblioteca. Los reels exportados antes de esta función no guardaron su origen, así que no se pueden editar. Cada uno guarda un registro con lo que lo generó: template, duración, fuente, tramo, encuadre, formas, textos, audio y datos de la exportación. Sirve para comparar después qué combinación funciona mejor en las redes.
+
+Exportar un reel de 10 s de una foto con 100 formas tarda unos 9 s; uno de 2,5 s de video, unos 4 s (más el cálculo de las formas).
+
+La vista previa reproduce el reel o el original. Si cambiás el encuadre, la porción o los ajustes, avisa que hay que generar de nuevo. Los templates viven en `web/templates.js`, cada uno como una receta: su configuración base, el recorte sobre el que se calculan las formas, el contenido como función del tiempo (así la exportación dibuja exactamente los mismos cuadros que la vista previa) y sus frases, con tiempos relativos a la duración.
+
+Próximas etapas: una cola de publicación con una regla configurable (por ejemplo, un reel por día a cierta hora) y la publicación automática.
+
+
+
+**Presets.** Cada template puede tener presets guardados: ajustes con nombre (formas, tipo, animación, duración, original al final, frases, marca y canción) para usar con cualquier foto o video. En la sección Template aparece "Presets de <template>": **Base** (la configuración base) y los guardados; un clic aplica uno y la × lo borra. Al terminar de editar, **Guardar como preset…** (en Exportar) guarda el estado actual como preset del template elegido; con un nombre que ya existe en ese template, lo reemplaza. No guardan lo que depende de la fuente (encuadre, tramo del video, frames de prueba). Se guardan en la carpeta de la biblioteca (`.presets.json`; la canción, en `sources/`).
+
+**Original al final.** En los templates que terminan mostrando la foto o el video original (Revelado, Video en formas, ¿En qué nivel?, Contador y Mosaico), en la sección Duración se elige cuántos segundos antes del final empieza a aparecer el original; en 0 no se muestra (las formas siguen hasta el final). Cada template trae su valor en la configuración base (Revelado 5,5 s, ¿En qué nivel? 3 s, Video en formas, Contador y Mosaico 2 s), que es el que usa el generador; cambiarlo a mano lo mantiene al cambiar de template, y "Usar el de la configuración base" vuelve al del template. Lo anterior (armado de formas, niveles, contador) se acomoda para terminar antes. Se guarda con el reel (`ending` en su registro).
+
+## Generar reels automáticamente
+
+`/generar.html` (enlace "generar" arriba de los editores). Cada foto o video que dejes en la **carpeta de entrada** se convierte en varios reels, **uno por template elegido** (los que correspondan: algunos son solo para fotos o solo para videos), con la configuración base de cada uno. Los reels van a la **carpeta de generados**, cada uno con su JSON (título y descripción sacados de sus frases, más el registro de cómo se hizo), aparte de la carpeta de publicación. Cuando están todas las versiones, la fuente pasa a `procesados/` dentro de la entrada.
+
+- **Subir desde la página:** arrastrá fotos o videos a la página (o usá **Elegir archivos…**, se pueden varios a la vez). Se guardan en la carpeta de entrada. Si el nombre ya se usó (en la entrada o en `procesados/`), se guarda como `nombre (2).png`. Dejarlos directamente en la carpeta sigue funcionando igual.
+- **Elegir qué templates probar:** cada foto o video nuevo (subido o dejado en la carpeta) aparece en **Elegí qué templates probar**, con una vista previa y solo los templates que le corresponden (cada uno con su descripción). Marcás los que quieras, ajustás los idiomas si hace falta (por defecto los de la configuración) y **Generar** hace un reel por template e idioma; la página dice cuántas versiones son. **Editarlo yo** abre esa foto o video en el editor de reels para armar el reel a mano, con todos los controles; al guardarlo va a Generados como versión ya refinada (el título sale de su frase de título, o del nombre del archivo) y, si dejás marcada la opción, directo a la cola de publicación. La fuente deja de esperar y pasa a `procesados/` (se puede seguir refinando o editando desde Revisar y Publicar). **Descartar** no genera nada y pasa el archivo a `descartados/` dentro de la entrada (no se borra). Si destildás **Preguntar qué templates probar**, vuelve el modo totalmente automático: cada fuente nueva genera los **templates por defecto** apenas aparece.
+- **Grupo Virales:** al elegir templates, el botón **Virales** marca de un clic ¿Qué es?, 3 2 1, Similitud % y Lupa (los que correspondan a la foto o al video); otro clic los desmarca. En la configuración, **Solo virales** deja esos cuatro como templates por defecto (y **Todos** vuelve a todos); se guarda con **Guardar**.
+- **Elegir el preset:** debajo de cada template marcado aparecen sus chips **Base** y los presets guardados de ese template. Podés marcar varios (al menos uno): cada preset marcado es una versión más, por cada idioma, y el nombre queda `<fuente> · <template> · <preset> · <idioma>.mp4`. El preset pone la disposición, las formas, la animación, la duración, el original al final y la canción; los textos en pantalla los sigue escribiendo el redactor para cada idioma. Revisar muestra el preset de cada versión, y elegir o refinar una versión se propaga a los otros idiomas del mismo preset.
+- En la página se puede pausar el generador (si está pausado, lo que subas espera y la página ofrece **Activar**). **En proceso** muestra una línea por fuente: cuántas versiones están listas, cuál se está haciendo y las que fallaron (con **Reintentar**). Los reels generados se revisan en **Revisar** (ver abajo).
+- Las fuentes se toman cuando terminan de copiarse (el tamaño deja de cambiar) y se procesan de a una. Si el servidor se reinicia, lo que estaba a medio hacer vuelve a la cola.
+- **Cómo funciona:** para que los reels salgan idénticos a los del editor, el servidor abre el mismo editor de reels en un **Chromium sin pantalla** (`reels.html?auto=<trabajo>`). Esa página carga la fuente, elige el template con su base, espera las formas (o calcula el video), exporta y devuelve el MP4. Si el navegador no puede reproducir el video (Chromium sin H.264), el servidor le da una copia en WebM. La imagen de Docker trae Chromium y las fuentes (con emoji). Sin Docker hace falta tener Chromium o Chrome instalado (`CHROME_BIN` para indicar cuál).
+- Cada reel tarda aproximadamente 1 minuto (30 s a 1 min con 150 formas; más con Mosaico, de 500, o con ¿Cuál preferís?, que calcula cuatro tipos de forma).
+
+### Títulos, descripciones, tags e idiomas
+
+Cada reel generado sale **en cada idioma configurado** (por defecto español e inglés): un video por idioma, con sus frases en pantalla traducidas, y su título, descripción (con `#Shorts` y hashtags) y tags en el JSON (`"lang"`, `"title"`, `"hook"`, `"description"`, `"tags"`). Los archivos se llaman `<fuente> · <template> · <idioma>.mp4`.
+
+- **El título base sale del nombre del archivo**, limpio de lo que no dice nada (`mona_lisa-final (2).png` → "Mona lisa"; capturas de pantalla o `IMG_20240101…` no dan título). Con ese título, el template y un cuadro de la fuente, un modelo escribe todo junto, una vez por fuente y template, para todos los idiomas: título del video, frase de entrada en pantalla, cierre, descripción, tags y las frases propias del template (como "¿En qué nivel la adivinaste?").
+- **Quién escribe** (en la página Generar o con variables de entorno):
+  - **Claude** (por defecto si hay `ANTHROPIC_API_KEY` en el `.env`): mira también la imagen. Modelo `claude-opus-5-5` salvo que pongas otro en `CLAUDE_MODEL` (o en el campo Modelo de la página); un nombre que no empieza con `claude-` se ignora para Claude, así el `LLM_MODEL` del modelo local no le llega.
+  - **Un modelo local** con API compatible con OpenAI (Ollama, LM Studio…): `LLM_BASE_URL` (por ejemplo `http://host.docker.internal:11434/v1` para Ollama) y `LLM_MODEL` con el modelo que tengas descargado. Solo recibe texto.
+  - **Reglas**, sin modelo: textos armados a partir del título (en español e inglés; otros idiomas usan el inglés).
+  Si el modelo falla (sin conexión, key inválida…), ese reel usa las reglas y el registro lo dice, así nunca se queda sin textos.
+- Los idiomas son códigos de dos letras (`es, en, pt…`); cada uno suma una versión de cada reel, o sea más tiempo de generación.
+
+**Carpetas con Docker** (en `.env`, ver `.env.example`): `INPUT_HOST_DIR` (entrada, se monta en `/entrada`) y `GENERATED_HOST_DIR` (generados, en `/generados`). Sin Docker: `-input` / `INPUT_DIR` (por defecto `./entrada`) y `-generated` / `GENERATED_DIR` (por defecto `./generados`). El banco de audios: `AUDIOS_HOST_DIR` (en `/audios`, solo lectura); sin Docker, `-audios` / `AUDIOS_DIR` (por defecto `./audios`).
+
+
+## Revisar: elegir, refinar y mandar a la cola
+
+`/revisar.html`. Lo generado no va directo a publicar: pasa por vos.
+
+1. **Elegir.** Las versiones de cada fuente aparecen agrupadas por idioma. **▶** (o un clic en el video) las abre en **pantalla completa**, con sonido, para recorrerlas con el teclado: ← → otra versión, **Enter** elegir, **X** descartar, Espacio pausa, **F** pantalla completa del navegador, Esc cerrar. Elegir una deja **una sola por idioma**: las demás de esa fuente e idioma pasan a `descartados/` dentro de Generados (se pueden **restaurar**). En los idiomas que todavía no tienen elegida se elige **el mismo template**, porque un reel es una pieza con una versión por idioma (igual se puede elegir otro para un idioma).
+2. **Refinar, una vez para todos los idiomas.** La elegida se abre en el editor de reels (`reels.html?refine=<versión>`) con todo lo que la generó: template, encuadre, formas, algoritmo, animación, duración o tramo, frases, marca y audio. Arriba aparece una pestaña por idioma del mismo reel: los ajustes son compartidos y las frases se escriben en cada idioma (cambiando de pestaña se ven y se editan). **Guardar versión refinada** vuelve a exportar todos los idiomas con esos cambios y, si está marcado "mandar todos los idiomas a la cola" (por defecto sí), los pasa a la carpeta de publicación. Título, descripción y tags de cada versión se editan en Revisar (**Textos**).
+3. **A la cola.** Al guardar el refinado, o a mano desde Revisar. Solo las refinadas pueden ir a la cola; si se desmarca "Pedir el refinado antes de la cola", alcanza con elegirlas.
+
+La etapa de cada versión (generada, elegida, refinada) se guarda en su JSON (`"stage"`).
+
+## Publicar
+
+`/publicar.html` (enlace "publicar" arriba de los editores) maneja la cola de publicación.
+
+**La carpeta.** Los videos que dejes en la carpeta de publicación (MP4, MOV, M4V o WebM) forman la cola: del más viejo al más nuevo, salvo que los reordenes. Cada uno puede tener al lado un `.json` con el mismo nombre:
+
+```json
+{ "title": "La Mona Lisa con 150 triángulos", "description": "¿Cuál hago mañana? #Shorts", "tags": ["arte", "lowpoly"] }
+```
+
+Sin JSON, el título sale del nombre del archivo y la descripción es `#Shorts`. Desde la página se pueden editar con **Textos** (se guardan en ese JSON). Al publicarse, el video y su JSON pasan a `publicados/`, con la fecha y el resultado. La página avisa si un video no sirve como Short (horizontal o de más de 60 s). Un clic en un video (de la cola o de los publicados) abre la **vista previa de lo que se va a publicar**: el reel grande, con sonido, y al costado título, descripción, tags, cuándo sale y los avisos; por defecto se ve **como en Shorts**, con el nombre del canal (la marca del reel), el título y la primera línea de la descripción encima del video (se puede quitar). ← → recorre la cola, Esc cierra.
+
+El editor de reels manda reels de la biblioteca a la cola con **A la cola**: el título sale de la frase de título (o de la pregunta) con `{formas}` y `{tipo}` completados, y la descripción del cierre más `#Shorts`.
+
+**Editar reel.** Cada reel de la cola que salió del generador (o de Revisar), o de la biblioteca del editor de reels, se puede volver a abrir en el editor de reels con **Editar reel**, con todos sus ajustes y con sus otros idiomas que estén en la cola (mismo origen y template). Igual que al refinar, los cambios valen para todos los idiomas y las frases se editan en cada uno. **Guardar cambios en la cola** vuelve a exportar todos los idiomas y los reemplaza en su mismo lugar de la cola, sin tocar título, descripción ni tags (esos se cambian con **Textos**). Si el reel tiene una canción elegida por vos, se guarda una copia (en `sources/` de la biblioteca), así que al reabrirlo vuelve con la canción y su punto de inicio; lo mismo al editar desde la biblioteca o refinar.
+
+**Duplicar en otro idioma.** Cada reel de la cola que salió del generador tiene **Duplicar en otro idioma**: elegís el idioma (es, en, pt, fr, it, de u otro código) y un **LLM local** traduce todos los textos —título, descripción, tags y cada frase que aparece en pantalla—, manteniendo `{formas}`, `{tipo}`, los emojis y `#Shorts`. Después se vuelve a renderizar el reel con los mismos ajustes (Chromium en el contenedor) y la copia entra a la cola justo después del original, ya refinada. El avance se ve en "Duplicando en otros idiomas", con **Reintentar** si falla. Usa siempre el modelo local (el de la página Generar, o `LLM_BASE_URL` / `LLM_MODEL`), nunca Claude. No se puede duplicar a un idioma que ya está en la cola, ni un video que no tenga sus ajustes (por ejemplo, uno dejado a mano en la carpeta).
+
+**La regla.** Horarios (uno o varios por día), días de la semana y zona horaria (por defecto Buenos Aires); por ejemplo, "todos los días a las 19:00". En cada horario se publica el siguiente video de la cola. **Descartar** saca un video de la cola sin borrarlo: pasa (con su JSON) a `descartados/` dentro de la carpeta de publicación, y aparece abajo en **Descartados**, desde donde se puede ver, descargar o **Restaurar** a la cola. Cada video (en la cola o ya publicado) tiene **Descargar**, que baja el MP4 tal cual, con su nombre. Los videos se pueden subir o bajar, **saltear** (quedan en la carpeta sin publicarse), **publicar ahora** y, ya publicados, **volver a la cola**. Si el servidor estuvo apagado durante varios horarios, al volver publica uno solo (no una ráfaga). La regla, el orden y el registro se guardan en la propia carpeta (`.cola.json`).
+
+**Plataformas.** En la sección **Plataformas** de la página se conectan las cuentas y se marca dónde publicar: YouTube, TikTok o los dos. "Publicar ahora" y la regla suben el video de verdad a las marcadas; sin ninguna marcada, la publicación es simulada (marca el video y lo mueve a `publicados/` sin subirlo). Si una plataforma falla y la otra no, el video queda en la cola con el error en el registro y lo que ya se subió anotado en su JSON (`uploads`): al reintentar no se publica dos veces. Ya publicado, el video muestra los enlaces (`youtube.com/shorts/…`, `tiktok.com/@…/video/…`).
+
+**Confirmar antes de publicar.** "Publicar ahora" abre una ventana con el video y, por plataforma: en YouTube, título y visibilidad; en TikTok, la cuenta (nombre y foto, leídos de TikTok en ese momento), el texto, quién puede verlo (sin nada elegido de antemano, entre las opciones que TikTok da para esa cuenta), permitir comentarios / Dúo / Stitch (sin marcar; los que la cuenta tiene desactivados no se pueden marcar), y la divulgación de contenido comercial ("Tu marca" / "Contenido de marca"; el contenido de marca no puede ser "Solo yo"), con el aviso de las políticas de TikTok. Lo elegido vale solo para esa publicación; la regla automática usa la configuración de Plataformas.
+
+### Publicar en YouTube y TikTok
+
+Hace falta crear, una vez, una "app" en cada plataforma (son gratis) y poner sus credenciales en el `.env`; después cada cuenta se conecta desde la página con su login.
+
+**YouTube**
+1. En [Google Cloud Console](https://console.cloud.google.com/) creá un proyecto y habilitá **YouTube Data API v3** (APIs y servicios → Biblioteca).
+2. **Pantalla de consentimiento de OAuth**: tipo *Externo*, con tu mail; en *Usuarios de prueba* agregá la cuenta de Google del canal.
+3. **Credenciales → Crear credenciales → ID de cliente de OAuth**, tipo **Aplicación web**, con este *URI de redireccionamiento autorizado*: `http://localhost:8080/api/publish/oauth/youtube/callback` (la página muestra el exacto).
+4. Copiá el ID y el secreto al `.env` (`YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`), reiniciá (`docker compose up --build`) y tocá **Conectar YouTube**.
+
+Con la app en modo *Prueba*, Google puede pedir que vuelvas a conectar cada tanto; publicarla (sin verificación, solo la usás vos) lo evita. La cuota normal alcanza para unas 100 subidas por día. Los videos se publican con la privacidad elegida (por defecto público), categoría "Personas y blogs" y sin ser "para niños"; YouTube decide solo si lo muestra como Short (los reels son verticales y cortos, y la descripción lleva `#Shorts`).
+
+**TikTok**
+1. En [TikTok for Developers](https://developers.tiktok.com/) creá una app (plataforma **Web**) y agregale los productos **Login Kit** y **Content Posting API** (con *Direct Post*), con los permisos `user.info.basic` y `video.publish`. Como *Terms of Service URL* y *Privacy Policy URL* van las páginas de `docs/` publicadas en GitHub Pages (ver abajo).
+2. TikTok solo acepta direcciones `https` para volver después del login, y la app corre en `localhost`. Por eso se registra como *Redirect URI* una página de GitHub Pages que reenvía al instante a la app: `https://guidodsalem.github.io/To-Primitive/tiktok/callback.html` (es `docs/tiktok/callback.html`; si la app no usa el puerto 8080, cambialo ahí).
+3. En el `.env`: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` y `TIKTOK_REDIRECT_URI` con esa misma dirección. Reiniciá y tocá **Conectar TikTok**.
+
+(Si TikTok aceptara `http://localhost:8080/api/publish/oauth/tiktok/callback`, por ejemplo en una app *Desktop*, dejá `TIKTOK_REDIRECT_URI` vacío: la app vuelve directo y usa PKCE.)
+
+**Páginas públicas (GitHub Pages).** La carpeta `docs/` tiene la presentación, los términos (`terms.html`), la política de privacidad (`privacy.html`) y la página de retorno de TikTok. Para publicarlas: en GitHub, *Settings → Pages → Build and deployment*: *Deploy from a branch*, rama `main` y carpeta `/docs`. Quedan en `https://guidodsalem.github.io/To-Primitive/`.
+
+**Importante:** hasta que TikTok audite la app, todo lo que se publique por la API queda **privado** ("Solo yo"), y TikTok puede pedir que la cuenta sea privada. La app lo detecta y publica como "Solo yo" (después lo cambiás en TikTok). Para publicar en público hay que pedir la auditoría desde el portal de desarrolladores.
+
+Los permisos de las cuentas se guardan en la carpeta de la biblioteca (`.cuentas.json`, en el volumen de Docker), no en la carpeta de publicación. **Desconectar** los olvida.
+
+**Con Docker**, la carpeta de tu computadora se monta en `/publicar`. Copiá `.env.example` a `.env` y poné ahí la ruta:
+
+```sh
+cp .env.example .env   # PUBLISH_HOST_DIR=/Users/.../Reels
+docker compose up --build
+```
+
+Sin Docker: `-publish <carpeta>` o `PUBLISH_DIR` (por defecto `./publicar`).
+
 ## Video
 
 1. **Subí un video.** Se abre el editor sobre un frame de la mitad.
@@ -232,6 +395,7 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
   - En el servidor, `ffmpeg` decodifica los frames por un pipe y agrega el audio al MP4 exportado.
   - En el navegador (`web/motion.js`, `web/mp4.js`): interpolación, dibujo, WebCodecs, un muxer MP4 propio y la generación de Lottie, sin librerías.
 - **Grabación de imágenes** (`web/build.js`): línea de tiempo con curvas de easing, orden de aparición y efectos. Reutiliza el dibujo y el exportador MP4.
+- **Progreso** (`web/busy.js`): la dona de arriba a la izquierda. Sigue sola cada `<progress>` visible que no esté completo, y lo que cada página informa con `Busy.set(clave, fracción, etiqueta)` / `Busy.done(clave)` (fracción `null` = sin porcentaje). La subida a las plataformas informa cuánto subió (`progress` en los videos de la cola que se están publicando).
 - **Selectores visuales** (`web/picker.js`): reemplazan un `<select>` por tarjetas animadas, que solo se dibujan mientras están en pantalla y a 24 fps. El `<select>` queda oculto como fuente del valor.
 - **Escena 3D** (`web/scene3d.js`): usa la misma línea de tiempo con cámara en perspectiva y piezas en profundidad.
 - **En vivo:**
@@ -251,9 +415,9 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `GET /api/sessions/{id}/export?format=png\|svg\|gif&size=1024&n=200` | Descarga el resultado |
 | `POST /api/videos` | Sube un video (multipart, campo `video`) |
 | `GET /api/videos/{id}/frame?t=1.5&size=320` | Frame crudo en JPEG (previsualización) |
-| `POST /api/videos/{id}/frames` | Crea una sesión de edición sobre el frame `t` |
+| `POST /api/videos/{id}/frames` | Crea una sesión de edición sobre el frame `t` (opcional `crop`, como en `compute`) |
 | `GET /api/videos/{id}/events` | Stream SSE: `job` (progreso), `animation` (dimensiones y fondo) y `keyframe` (cada keyframe calculado) |
-| `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`, `flow`) |
+| `POST /api/videos/{id}/compute` | Calcula los keyframes (parámetros + `kfps`, `adapt`, `flow`; opcionalmente una porción con `start` y `length` en segundos, y un recorte `crop: {x, y, w, h}` en fracciones del cuadro) |
 | `DELETE /api/videos/{id}/compute` | Cancela el cálculo |
 | `GET /api/videos/{id}/keyframes` | Todos los keyframes calculados hasta el momento (JSON) |
 | `GET /api/videos/{id}/source` | El video original (audio y reloj del reproductor) |
@@ -263,6 +427,54 @@ Los tests (`temporal_test.go`, `encode_test.go`) lo verifican con datos:
 | `POST /api/live/{id}/frame` | Un frame de la cámara (JPEG); header `X-Capture-Time` con el reloj del navegador |
 | `PUT /api/live/{id}/params` | Cambia los parámetros (`restart: true` empieza de nuevo) |
 | `DELETE /api/live/{id}` | Cierra la sesión (también se cierra sola a los 10 s sin nadie mirando) |
+| `POST /api/reels/mux` | Agrega el audio a un reel codificado en el navegador. Campos: `video`; opcionales `audio` (archivo propio) o `source` (id de un video subido, con `sourceStart`), más `audioStart`, `volume` y `fadeOut`. El audio se recorta a la duración del video, se rellena con silencio si es más corto y termina con un fundido. Si el video no es H.264 se convierte. Con `save=1` (y `meta`) lo guarda en la biblioteca y responde con su entrada en vez del archivo; con `src` (la foto) o `srcVideo` + `srcName` (id de un video subido) guarda también su origen, para editarlo después. Con `lib=<id>` reemplaza ese reel de la biblioteca |
+| `POST /api/reels` | Guarda un reel terminado en la biblioteca (campos `video` y `meta`, un JSON libre: template, duración, ajustes…) |
+| `GET /api/reels` | Lista la biblioteca, del más nuevo al más viejo |
+| `GET /api/reels/{id}/video` | El MP4 de un reel (`?download=1` para descargarlo) |
+| `DELETE /api/reels/{id}` | Borra un reel de la biblioteca (y su origen, si ningún otro reel lo usa) |
+| `GET /api/presets` · `POST /api/presets` · `DELETE /api/presets/{id}` | Presets de los templates: listar, guardar (`template`, `name`, `settings` en JSON y, opcional, la canción en `audio`) y borrar |
+| `GET /api/reels/files/{hash}/{name}` | Un archivo guardado para reabrir reels (origen o canción; su ruta está en el registro, p. ej. `audio.kept`) |
+| `GET /api/reels/{id}/spec` · `GET …/source` | Ajustes y origen, para reabrirlo en el editor (`reels.html?lib=`) |
+| `POST /api/reels/{id}/queue` | Copia un reel de la biblioteca a la carpeta de publicación (con título y descripción) |
+| `GET /api/publish` | Regla, cola (con el horario de cada video), publicados y registro |
+| `PUT /api/publish/settings` | La regla: `enabled`, `times` (HH:MM), `days` (0 = domingo), `tz`; y dónde publicar: `platforms` (`youtube`, `tiktok`), `youtubePrivacy`, `tiktokPrivacy` |
+| `PUT /api/publish/order` | Orden preferido de la cola (`names`) |
+| `PUT /api/publish/queue/{name}/meta` | Título, descripción y etiquetas (en el JSON del video) |
+| `GET /api/publish/queue/{name}/video` · `GET /api/publish/published/{name}/video` | El video; con `?download=1`, como descarga con su nombre |
+| `GET /api/publish/queue/{name}/post` | Lo que muestra la ventana de confirmación: textos y la cuenta de TikTok (privacidades, interacciones, duración máxima) |
+| `POST /api/publish/queue/{name}/now` (con JSON) | Publicar con lo confirmado: `platforms`, `youtube` {`privacy`, `title`}, `tiktok` {`privacy`, `caption`, `allowComment`, `allowDuet`, `allowStitch`, `brandOrganic`, `brandContent`} |
+| `GET /api/publish/accounts` | Cuentas: si están configuradas y conectadas, y la dirección de retorno a registrar |
+| `GET /api/publish/accounts/{plataforma}/connect` · `POST …/disconnect` | Conectar (OAuth) o desconectar YouTube / TikTok; vuelven por `/api/publish/oauth/{plataforma}/callback` |
+| `POST /api/publish/queue/{name}/discard` · `POST /api/publish/discarded/{name}/restore` | Descartar un video (a `descartados/`) o devolverlo a la cola; `GET /api/publish/discarded/{name}/video` para verlo |
+| `POST /api/publish/queue/{name}/skip` | Saltear o incluir (`skip`) |
+| `POST /api/publish/queue/{name}/now` | Publicar ya |
+| `POST /api/publish/published/{name}/requeue` | Devolver un publicado a la cola (primero) |
+| `POST /api/publish/queue/{name}/duplicate` | Duplicar en otro idioma (`lang`): traduce con el LLM local y renderiza la copia |
+| `GET /api/publish/copies` | Copias en curso (estado, progreso, error) |
+| `GET /api/publish/queue/{name}/spec` | Ajustes, fuente y otros idiomas en la cola, para reabrirlo en el editor (`reels.html?edit=`) |
+| `GET /api/publish/queue/{name}/source` | La foto o video de origen |
+| `GET /api/auto` | Generador: ajustes, trabajos, reels generados y registro |
+| `POST /api/auto/inputs` | Sube fotos o videos (campo `file`, uno o varios) a la carpeta de entrada; responde los nombres con que quedaron |
+| `GET /api/auto/inputs/{name}` | Una fuente que espera la elección de templates (para verla) |
+| `GET /api/auto/inputs/{name}/spec` | Lo que el editor necesita para armar a mano una fuente (`reels.html?src=`); el reel se guarda con `POST /api/reels/mux` y `manual=<fuente>` |
+| `GET /api/audios` | Banco de audios: la carpeta y sus canciones (`name` con subcarpeta, tamaño, fecha) |
+| `GET /api/audios/files/{name}` | Una canción del banco |
+| `POST /api/auto/inputs/{name}/start` | Genera los templates elegidos (`templates`) en los idiomas elegidos (`languages`, vacío = los de la configuración) y, por template, los presets (`presets`: `{"template": ["id", ...]}`, `""` = la base) |
+| `POST /api/auto/inputs/{name}/dismiss` | Descarta una fuente que espera: pasa a `descartados/` de la entrada |
+| `PUT /api/auto/settings` | `enabled`, `skipChoice` (no preguntar: los templates por defecto apenas aparece una fuente), `templates` (vacío = todos), `languages` y `llm` (`provider`: `anthropic`, `local`, `none` o vacío = automático; `model`; `baseURL`) |
+| `GET /api/auto/jobs/{id}` · `/source` | Lo que la página automática necesita: template y fuente (`?compat` = video en WebM) |
+| `POST /api/auto/jobs/{id}/progress` · `/fail` · `/retry` | Avance, error y reintento de un trabajo |
+| `GET /api/auto/outputs/{name}/video` · `POST …/queue` · `DELETE` | Ver, mandar a la cola de publicación o borrar un reel generado |
+| `POST /api/reels/mux` con `job` | El reel terminado de un trabajo (va a la carpeta de generados) |
+| `POST /api/reels/mux` con `queue` | Un reel de la cola editado de nuevo: lo reemplaza en su lugar (con sus nuevos ajustes) |
+| `GET /api/review` | Versiones generadas por fuente e idioma, con su etapa, y las descartadas |
+| `POST /api/review/{name}/choose` · `/discard` · `/restore` | Elegir (descarta las otras del mismo idioma), descartar, restaurar |
+| `PUT /api/review/{name}/meta` | Título, descripción y tags de una versión |
+| `GET /api/review/{name}/spec` · `/source` | Lo que el editor necesita para refinarla: su registro y su fuente |
+| `POST /api/reels/mux` con `refine` | La versión refinada (la reemplaza) |
+| `POST /api/review/{name}/queue` | A la carpeta de publicación (refinada, o elegida si no se pide refinado) |
+
+La biblioteca de reels vive en `REELS_DIR` (o `-reels`), por defecto `./reels`. A diferencia de los archivos subidos, no se borra al reiniciar. En Docker es el volumen `reels` (montado en `/reels`).
 
 ### Formato de los keyframes
 

@@ -1,0 +1,2429 @@
+"use strict";
+
+// Reel editor: a photo or a portion of a video, framed vertically (9:16),
+// turned into shapes and played through a template with texts on top.
+
+const $ = (id) => document.getElementById(id);
+const ASPECT = 9 / 16;
+const MAX_PORTION = 60; // seconds of video per reel
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}.${Math.floor((s % 1) * 10)}`;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  return res.headers.get("Content-Type")?.includes("json") ? res.json() : res;
+}
+
+const reel = {
+  kind: null,       // "image" | "video"
+  name: "",
+  url: null,        // object URL of the local file
+  img: null,        // the photo
+  video: null,      // { id, info } of the uploaded video
+  portion: { start: 0, end: 0 },
+  framing: { mode: "fill", zoom: 1, px: 0.5, py: 0.5 },
+  template: "auto",
+  duration: { preset: "15", free: 20 },
+  ending: null,     // seconds the original is shown at the end (0: not shown; null: the template's)
+  preset: null,     // id of the preset applied (null: the template's base)
+  audio: { mode: "none", file: null, url: null, bank: null }, // mode: "none" | "source" | "file"; bank: its name in the audio bank
+  phrases: [],      // see Templates: { role, text, from, to, pos, style, extend? }
+  outro: { kind: "none", seconds: 2.5, text: "", handle: "", logo: null }, // brand ending (Templates.outro); logo: { name, src, bg, shapes, image, version }
+  touched: new Set(), // settings changed by hand: a template's base doesn't override them
+  lang: "es",       // language of the texts drawn on the reel
+  gen: null,        // generated shapes: { key, image } (photo) or { key, anim } (video)
+  testFrames: [],   // video: moments kept to try the settings on (seconds)
+  generating: null, // { cancel() } while generating
+};
+const srcVideo = $("srcVideo");
+
+// ---------- framing ----------
+
+function sourceSize() {
+  if (reel.kind === "image") return [reel.img.naturalWidth, reel.img.naturalHeight];
+  if (reel.kind === "video") return [srcVideo.videoWidth || reel.video.info.width, srcVideo.videoHeight || reel.video.info.height];
+  return [0, 0];
+}
+
+// The region of the source shown in the frame, as fractions; null when the
+// whole source is fitted ("fit").
+// The template decides the shape of the region (9:16, or 9:8 panels for a
+// comparison): the shapes are computed on exactly that.
+const layout = () => {
+  const spec = Templates.LIST[templateId()];
+  return { aspect: spec?.aspect ?? ASPECT, stack: spec?.stack ?? 1 };
+};
+
+function crop() {
+  if (reel.framing.mode !== "fill") return null;
+  const [w, h] = sourceSize();
+  if (!w || !h) return null;
+  const A = layout().aspect;
+  let bw = w, bh = w / A; // largest rectangle of that shape inside the source
+  if (bh > h) { bh = h; bw = h * A; }
+  const cw = bw / reel.framing.zoom, ch = bh / reel.framing.zoom;
+  const r = (v) => Math.round(v * 1e5) / 1e5;
+  return { x: r(((w - cw) * reel.framing.px) / w), y: r(((h - ch) * reel.framing.py) / h), w: r(cw / w), h: r(ch / h) };
+}
+
+// Aspect (width / height) of what the content covers (panels stacked).
+function contentAspect() {
+  const { aspect, stack } = layout();
+  if (reel.framing.mode === "fill") return aspect / stack;
+  const [w, h] = sourceSize();
+  return w && h ? w / h / stack : ASPECT;
+}
+
+// Draw panel(ctx, x, y, w, h, i) for each stacked panel of a w x h content.
+function panels(ctx, w, h, panel) {
+  const n = layout().stack;
+  for (let i = 0; i < n; i++) {
+    const y0 = Math.round((i * h) / n), y1 = Math.round(((i + 1) * h) / n);
+    panel(ctx, 0, y0, w, y1 - y0, i);
+  }
+}
+
+// Scratch canvases for drawFramed, one set per target so that drawing the
+// preview and the template cards doesn't keep resizing the same ones.
+const buffers = () => ({ layer: document.createElement("canvas"), tiny: document.createElement("canvas") });
+const previewBufs = buffers();
+
+// Draw a frame of the reel: paint(ctx, w, h) draws the content filling w x h.
+// In "fit" mode the content is letterboxed over a blurred, darkened copy of
+// itself (scaling a tiny copy up blurs it for free).
+function drawFramed(ctx, W, H, paint, bufs = previewBufs) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (reel.framing.mode === "fill") {
+    paint(ctx, W, H);
+    return;
+  }
+  const { layer, tiny } = bufs;
+  const aspect = contentAspect();
+  let lw = W, lh = W / aspect;
+  if (lh > H) { lh = H; lw = H * aspect; }
+  lw = Math.max(1, Math.round(lw));
+  lh = Math.max(1, Math.round(lh));
+  if (layer.width !== lw || layer.height !== lh) { layer.width = lw; layer.height = lh; }
+  const lc = layer.getContext("2d");
+  lc.setTransform(1, 0, 0, 1, 0, 0);
+  paint(lc, lw, lh);
+
+  tiny.width = 24;
+  tiny.height = Math.max(1, Math.round(24 / aspect));
+  tiny.getContext("2d").drawImage(layer, 0, 0, tiny.width, tiny.height);
+  const s = Math.max(W / lw, H / lh) * 1.1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(tiny, (W - lw * s) / 2, (H - lh * s) / 2, lw * s, lh * s);
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(layer, Math.round((W - lw) / 2), Math.round((H - lh) / 2));
+}
+
+// The original (photo, or the video's current frame) with the current
+// framing. over: draw only the picture, on top of what's there (fades).
+function paintOriginal(ctx, w, h, over = false, x = 0, y = 0) {
+  const el = reel.kind === "image" ? reel.img : srcVideo;
+  const [sw, sh] = sourceSize();
+  const c = crop() ?? { x: 0, y: 0, w: 1, h: 1 };
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (!over) {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(x, y, w, h);
+  }
+  if (sw && (reel.kind === "image" || srcVideo.readyState >= 2)) {
+    ctx.drawImage(el, c.x * sw, c.y * sh, c.w * sw, c.h * sh, x, y, w, h);
+  }
+}
+
+// The original in every panel (what's being framed).
+const paintOriginalPanels = (ctx, w, h) => panels(ctx, w, h, (c, x, y, pw, ph) => paintOriginal(c, pw, ph, false, x, y));
+
+// ---------- template, duration and texts ----------
+
+const templateId = () => (reel.template === "auto" ? Templates.auto(reel.kind) : reel.template);
+// Values the phrases can mention: "{formas} {tipo}" → "150 triángulos".
+const textVars = () => ({ formas: params().shapes, tipo: Templates.words(reel.lang).names[params().mode] ?? Templates.words(reel.lang).shapes });
+
+// Requested length of the reel, in seconds.
+function reelSeconds() {
+  const d = reel.duration;
+  return d.preset === "free" ? clamp(+d.free || 15, 3, 90) : +d.preset;
+}
+
+// For videos the duration is set through the portion: the loop plays it
+// forward and back, so it takes half.
+const portionFactor = () => (templateId() === "loop" ? 2 : 1);
+
+// The template applied to the generated shapes, or null when there's
+// nothing (current) to show. Cached per shapes, template and duration.
+function composition(id = templateId(), withEnding = true) {
+  const spec = Templates.LIST[id];
+  if (!reel.gen || stale() || !spec.kinds.includes(reel.kind)) return null;
+  // Templates with several kinds of shapes need all of them computed.
+  const vs = spec.variants ? variantImages(spec.variants) : null;
+  if (spec.variants && !vs) return null;
+  const build = buildOpts(), interp = $("interp").value;
+  const ending = spec.ending ? reel.ending : null;
+  const key = JSON.stringify([id, reel.kind === "image" ? reelSeconds() : 0, build, interp, vs ? variants.version : 0, reel.lang, ending]);
+  const cache = (reel.gen.comps ??= new Map());
+  if (!cache.has(key)) {
+    cache.set(key, Templates.make(id, {
+      kind: reel.kind, image: reel.gen.image, anim: reel.gen.anim, variants: vs, duration: reelSeconds(), build, interp, lang: reel.lang, ending,
+      paintOriginal: (ctx, x, y, w, h) => paintOriginal(ctx, w, h, true, x, y),
+    }));
+  }
+  return withEnding ? withOutro(cache.get(key)) : cache.get(key);
+}
+
+// ---------- brand ending ----------
+
+// The ending scene as set, made again only when it changes.
+const outroCache = { key: null, scene: null };
+function outroScene() {
+  const o = { ...reel.outro, handle: reel.outro.handle.trim() || $("tBrand").value.trim() };
+  const key = JSON.stringify([o.kind, o.seconds, o.text, o.handle, reel.lang, o.logo?.version ?? 0]);
+  if (outroCache.key !== key) Object.assign(outroCache, { key, scene: Templates.outro(o, reel.lang) });
+  return outroCache.scene;
+}
+
+// A template's content followed by the ending scene: main is where the
+// template ends (its phrases are timed on it), the original video stays on
+// its last frame.
+const outroComps = new WeakMap(); // scene -> WeakMap(comp -> with it)
+function withOutro(comp) {
+  const scene = outroScene();
+  if (!scene) return comp;
+  if (!outroComps.has(scene)) outroComps.set(scene, new WeakMap());
+  const made = outroComps.get(scene);
+  if (!made.has(comp)) {
+    made.set(comp, {
+      ...comp, main: comp.duration, duration: comp.duration + scene.duration, outro: scene,
+      videoTime: (t) => comp.videoTime(Math.min(t, comp.duration - 0.04)),
+    });
+  }
+  return made.get(comp);
+}
+
+// ---------- variants: the same photo with other kinds of shapes ----------
+
+// For templates like "¿Cuál preferís?": one session per extra kind of
+// shape, with the same photo, framing and parameters (the editor's own
+// session covers the kind chosen in the controls). They run only while
+// such a template is chosen.
+const variants = { list: new Map(), version: 0, timer: 0 }; // mode -> { key, id, es, img, count, running, done }
+const variantKey = (mode) => JSON.stringify({ image: liveImageKey(), params: { ...params(), mode } });
+
+function wantedVariants() {
+  const spec = Templates.LIST[templateId()];
+  return reel.kind === "image" && spec?.variants ? spec.variants.filter((m) => m !== params().mode) : [];
+}
+
+// The shapes of each kind, in order, or null while any is missing.
+function variantImages(modes) {
+  const target = params().shapes;
+  const out = [];
+  for (const mode of modes) {
+    if (mode === params().mode) {
+      out.push({ mode, image: reel.gen.image });
+      continue;
+    }
+    const v = variants.list.get(mode);
+    if (!v?.done || v.key !== variantKey(mode)) return null;
+    out.push({ mode, image: { ...v.img, shapes: v.img.shapes.slice(0, target), scores: v.img.scores.slice(0, target) } });
+  }
+  return out;
+}
+
+function closeVariant(v) {
+  v.es?.close();
+  if (v.id) api(`/api/sessions/${v.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), mode: v.mode, paused: true }) }).catch(() => {});
+}
+function closeVariants() {
+  for (const v of variants.list.values()) closeVariant(v);
+  variants.list.clear();
+}
+
+// Start, restart or stop sessions so they match what the template needs
+// now (once the hand stops).
+function syncVariantsSoon() {
+  const want = wantedVariants();
+  const ok = want.length === variants.list.size && want.every((m) => variants.list.get(m)?.key === variantKey(m));
+  if (ok || variants.timer) return;
+  variants.timer = setTimeout(syncVariants, 400);
+}
+function syncVariants() {
+  variants.timer = 0;
+  const want = new Set(wantedVariants());
+  for (const [mode, v] of variants.list) {
+    if (!want.has(mode) || v.key !== variantKey(mode)) {
+      closeVariant(v);
+      variants.list.delete(mode);
+    }
+  }
+  for (const mode of want) if (!variants.list.has(mode)) startVariant(mode);
+}
+
+async function startVariant(mode) {
+  const p = { ...params(), mode };
+  const v = { mode, key: variantKey(mode), id: null, es: null, img: null, count: 0, running: true, done: false };
+  variants.list.set(mode, v);
+  let d;
+  try {
+    const form = new FormData();
+    form.append("image", await framedPhoto(), "reel.jpg");
+    form.append("params", JSON.stringify(p));
+    d = await api("/api/sessions", { method: "POST", body: form });
+  } catch {
+    variants.list.delete(mode);
+    return;
+  }
+  if (variants.list.get(mode) !== v) { // replaced meanwhile
+    closeVariant({ ...v, id: d.id });
+    return;
+  }
+  v.id = d.id;
+  let g = null;
+  const check = () => {
+    if (!v.done && v.img && !v.running && v.count >= p.shapes) {
+      v.done = true;
+      variants.version++;
+    }
+    liveChanged();
+  };
+  v.es = new EventSource(`/api/sessions/${d.id}/events`);
+  v.es.addEventListener("snapshot", (e) => {
+    const s = JSON.parse(e.data);
+    g = s.g;
+    v.img = { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore, shapes: s.data.slice(), scores: s.scores.slice() };
+    v.count = s.data.length;
+    v.running = s.running;
+    check();
+  });
+  v.es.addEventListener("shape", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== g || !v.img) return;
+    v.img.shapes[s.i] = s.data;
+    v.img.scores[s.i] = s.score;
+    v.count = Math.max(v.count, s.i + 1);
+  });
+  v.es.addEventListener("status", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== g) return;
+    v.count = s.count;
+    v.running = s.running;
+    check();
+  });
+}
+
+// A full frame of the reel at time t: framed content plus texts.
+function renderReel(ctx, comp, t, W, H, bufs) {
+  if (comp.outro && t >= comp.main) {
+    comp.outro.paint(ctx, t - comp.main, W, H, (c) => renderReel(c, comp, comp.main - 1e-3, W, H, bufs));
+    return;
+  }
+  drawFramed(ctx, W, H, (c, w, h) => comp.paint(c, t, w, h), bufs);
+  // Another template (a card) shows with its own phrases, carrying the texts.
+  const phrases = comp.id === templateId() ? reel.phrases : Templates.phrasesFor(comp.id, reel.phrases);
+  Templates.drawTexts(ctx, W, H, t, comp.main ?? comp.duration, phrases, { ...textVars(), ...comp.vars?.(t) }, $("tBrand").value);
+}
+
+// ---------- shape parameters (as in the editor) ----------
+
+function params() {
+  return {
+    shapes: +$("shapes").value,
+    mode: +document.querySelector("#mode .on").dataset.value,
+    alpha: $("alphaAuto").checked ? 0 : +$("alpha").value,
+    repeat: +$("repeat").value,
+    inputSize: +$("inputSize").value,
+    background: $("bgAuto").checked ? "" : $("background").value,
+  };
+}
+
+// Video-only computation settings.
+const videoOpts = () => ({ kfps: +$("kfps").value, adapt: +$("adapt").value, flow: $("videoFlow").checked });
+
+// How the photo's shapes appear (the editor's recording options).
+const buildOpts = () => ({
+  order: $("recOrder").value, curve: $("recCurve").value, effect: $("recEffect").value, effectTime: +$("recEffectTime").value,
+});
+
+// Everything the reel's shapes depend on: when it changes, they must be
+// found again (photos: automatically; videos: "Calcular el video").
+function genKey() {
+  return JSON.stringify({
+    kind: reel.kind, name: reel.name, mode: reel.framing.mode, crop: crop(), params: params(),
+    video: reel.kind === "video" ? { portion: reel.portion, ...videoOpts() } : null,
+  });
+}
+const stale = () => !!reel.gen && reel.gen.key !== genKey();
+
+// ---------- live shapes ----------
+
+// Like the editor: a session on the framed photo (or on a test frame of the
+// video) keeps finding shapes, and every parameter change shows at once.
+// For photos, its finished result is the reel's shapes.
+const live = {
+  token: 0,       // bumps on every new session, to drop stale answers
+  id: null, es: null,
+  key: null,      // the image it works on (source, framing, test frame)
+  g: null,        // current run of the session
+  img: null,      // { width, height, background, shapes, scores, baseScore }
+  running: false, count: 0, paused: false,
+  runKey: null,   // parameters the session says it's using (from its own events)
+  sentKey: null,  // parameters last sent (to skip repeated sends)
+};
+// Shape parameters as a comparable string, from params() or from a session event.
+const keyOf = (p) => JSON.stringify([p.shapes, p.mode, p.alpha, p.repeat, p.inputSize, p.background || ""]);
+const paramsKey = () => keyOf(params());
+
+function testTime() {
+  return reel.kind === "video" ? clamp(+$("testFrame").value, reel.portion.start, reel.portion.end) : 0;
+}
+const liveImageKey = () => JSON.stringify({ name: reel.name, url: reel.url, mode: reel.framing.mode, crop: crop(), t: testTime() });
+
+// Sessions left paused, by image (e.g. other test frames): going back to
+// one picks up its shapes where they were instead of starting over.
+const keptLive = new Map(); // liveImageKey → session id
+const MAX_KEPT = 6;
+
+function closeLive() {
+  live.es?.close();
+  if (live.id) {
+    // Free the CPU: the server drops old sessions by itself later.
+    api(`/api/sessions/${live.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: true }) }).catch(() => {});
+    if (live.key) {
+      keptLive.delete(live.key);
+      keptLive.set(live.key, live.id);
+      while (keptLive.size > MAX_KEPT) keptLive.delete(keptLive.keys().next().value);
+    }
+  }
+  Object.assign(live, { token: live.token + 1, id: null, es: null, key: null, g: null, img: null, running: false, count: 0, runKey: null, sentKey: null });
+}
+
+// The framed photo as a JPEG (the session works on exactly that).
+async function framedPhoto() {
+  const [w, h] = sourceSize();
+  const c = crop() ?? { x: 0, y: 0, w: 1, h: 1 };
+  const sw = c.w * w, sh = c.h * h;
+  const scale = Math.min(1, 1024 / Math.max(sw, sh));
+  const cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(sw * scale));
+  cv.height = Math.max(1, Math.round(sh * scale));
+  cv.getContext("2d").drawImage(reel.img, c.x * w, c.y * h, sw, sh, 0, 0, cv.width, cv.height);
+  return new Promise((r) => cv.toBlob(r, "image/jpeg", 0.92));
+}
+
+async function startLive() {
+  if (!reel.kind) return;
+  const key = liveImageKey();
+  if (live.key === key && live.id) return;
+  closeLive();
+  live.key = key;
+  const token = live.token;
+  const p = { ...params(), paused: live.paused };
+  const reused = keptLive.get(key);
+  keptLive.delete(key);
+  let d;
+  try {
+    if (reused) {
+      d = { id: reused };
+    } else if (reel.kind === "image") {
+      const form = new FormData();
+      form.append("image", await framedPhoto(), "reel.jpg");
+      form.append("params", JSON.stringify(p));
+      d = await api("/api/sessions", { method: "POST", body: form });
+    } else {
+      d = await api(`/api/videos/${reel.video.id}/frames`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ t: testTime(), params: p, crop: crop() }),
+      });
+    }
+  } catch (e) {
+    if (token === live.token) $("liveStatus").textContent = "Error: " + e.message;
+    return;
+  }
+  if (token !== live.token) return; // superseded meanwhile
+  live.id = d.id;
+  live.sentKey = reused ? null : keyOf(p); // a kept session has old parameters and is paused
+  const es = new EventSource(`/api/sessions/${d.id}/events`);
+  live.es = es;
+  // The server may have dropped a kept session meanwhile: make a new one.
+  if (reused) {
+    es.addEventListener("error", () => {
+      if (es.readyState !== EventSource.CLOSED || token !== live.token || live.img) return;
+      Object.assign(live, { id: null, key: null, es: null });
+      startLive();
+    });
+  }
+  // Every snapshot and status carries the parameters the session is using:
+  // that (not the order in which answers arrive) says whether its shapes
+  // are the ones the controls ask for.
+  es.addEventListener("snapshot", (e) => {
+    const s = JSON.parse(e.data);
+    live.runKey = keyOf(s.params);
+    live.g = s.g;
+    live.img = { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore, shapes: s.data.slice(), scores: s.scores.slice() };
+    live.running = s.running;
+    live.count = s.data.length;
+    if ($("bgAuto").checked) $("background").value = s.background;
+    liveChanged();
+  });
+  es.addEventListener("shape", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== live.g || !live.img) return;
+    live.img.shapes[s.i] = s.data;
+    live.img.scores[s.i] = s.score;
+    live.count = Math.max(live.count, s.i + 1);
+    liveChanged();
+  });
+  es.addEventListener("status", (e) => {
+    const s = JSON.parse(e.data);
+    if (s.g !== live.g) return;
+    live.runKey = keyOf(s.params);
+    live.running = s.running;
+    live.count = s.count;
+    liveChanged();
+  });
+  // The controls may have changed while the session was being created.
+  if (paramsKey() !== live.sentKey) sendParams();
+}
+
+// Reframing or another test frame needs a new session (once the hand stops).
+let restartTimer = 0;
+function restartLiveSoon() {
+  clearTimeout(restartTimer);
+  restartTimer = setTimeout(startLive, 350);
+}
+
+// Parameter changes go to the running session, as in the editor.
+let paramsTimer = 0;
+function sendParams() {
+  refreshUI();
+  if (!live.id) return;
+  clearTimeout(paramsTimer);
+  paramsTimer = setTimeout(async () => {
+    paramsTimer = 0;
+    const id = live.id, key = paramsKey();
+    if (!id || key === live.sentKey) return;
+    live.sentKey = key;
+    try {
+      await api(`/api/sessions/${id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: live.paused }) });
+    } catch {
+      if (id === live.id && live.sentKey === key) live.sentKey = null; // try again on the next change
+    }
+  }, 120);
+}
+
+// The live session moved on: redraw, and for photos take its finished
+// result as the reel's shapes.
+let liveDraw = 0;
+function liveChanged() {
+  const target = params().shapes;
+  // Safety net: the session follows other parameters and nothing is on its
+  // way to fix it (e.g. a send failed): send them again.
+  if (live.id && live.runKey && live.runKey !== paramsKey() && live.sentKey !== paramsKey() && !paramsTimer) sendParams();
+  if (reel.kind === "image" && live.img && !live.running && live.count >= target &&
+      live.key === liveImageKey() && live.runKey === paramsKey()) {
+    const key = genKey();
+    if (reel.gen?.key !== key) {
+      const im = live.img;
+      reel.gen = { key, image: { ...im, shapes: im.shapes.slice(0, target), scores: im.scores.slice(0, target) } };
+      Picker.refresh();
+      // The first time, show the reel right away.
+      if (!reel.shown) {
+        reel.shown = true;
+        setView("reel");
+        player.seek(0);
+        player.play();
+      }
+    }
+  }
+  if (!liveDraw) {
+    liveDraw = requestAnimationFrame(() => {
+      liveDraw = 0;
+      refreshUI();
+      if (!player.playing) player.draw();
+      Picker.refreshSoon();
+    });
+  }
+}
+
+$("pause").addEventListener("click", () => {
+  live.paused = !live.paused;
+  if (live.id) {
+    api(`/api/sessions/${live.id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params(), paused: live.paused }) }).catch(() => {});
+  }
+  refreshUI();
+});
+
+// The live shapes, filling w x h.
+// The live shapes, filling w x h; with stacked panels (a comparison), the
+// original on top and the shapes below.
+function paintLive(ctx, w, h) {
+  const im = live.img;
+  panels(ctx, w, h, (c, x, y, pw, ph, i) => {
+    if (!im || i < layout().stack - 1) {
+      paintOriginal(c, pw, ph, false, x, y);
+      return;
+    }
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = im.background;
+    c.fillRect(x, y, pw, ph);
+    const sx = pw / im.width, sy = ph / im.height;
+    c.save();
+    c.beginPath();
+    c.rect(x, y, pw, ph);
+    c.clip();
+    c.setTransform(sx, 0, 0, sy, x + 0.5 * sx, y + 0.5 * sy);
+    const n = Math.min(params().shapes, im.shapes.length);
+    for (let j = 0; j < n; j++) if (im.shapes[j]) Motion.drawShape(c, im.shapes[j], 1);
+    c.restore();
+  });
+}
+
+// ---------- video computation ----------
+
+function setProgress(fraction, text) {
+  $("genProgress").hidden = fraction === null;
+  if (fraction !== null) $("genProgress").value = fraction;
+  $("genStatus").textContent = text;
+}
+
+// Compute the keyframes for the chosen portion and framing.
+async function generateVideo(p) {
+  const v = reel.video;
+  const body = {
+    ...p, ...videoOpts(),
+    start: reel.portion.start, length: reel.portion.end - reel.portion.start, crop: crop(),
+  };
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`/api/videos/${v.id}/events`);
+    let armed = false;
+    const fail = (err) => { es.close(); reject(err); };
+    es.addEventListener("job", async (e) => {
+      const j = JSON.parse(e.data);
+      if (!armed) {
+        // The first event is the snapshot of an earlier job: start ours now.
+        armed = true;
+        try {
+          await api(`/api/videos/${v.id}/compute`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        } catch (err) {
+          fail(err);
+        }
+        return;
+      }
+      if (!j) return;
+      if (j.state === "running") {
+        setProgress(j.total ? j.frame / j.total : 0, `Calculando keyframes: ${j.frame} / ${j.total}`);
+      } else if (j.state === "done") {
+        es.close();
+        try {
+          resolve(await api(`/api/videos/${v.id}/keyframes`));
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        fail(new Error(j.error || "cancelado"));
+      }
+    });
+    reel.generating = {
+      cancel: () => {
+        api(`/api/videos/${v.id}/compute`, { method: "DELETE" }).catch(() => {});
+        fail(new DOMException("cancelado", "AbortError"));
+      },
+    };
+  });
+}
+
+$("generate").addEventListener("click", async () => {
+  if (reel.generating) {
+    reel.generating.cancel();
+    return;
+  }
+  const key = genKey();
+  $("generate").textContent = "Cancelar";
+  setProgress(0, "Preparando…");
+  // Free the CPU for the computation, as the editor does (and resume after).
+  const resume = !live.paused;
+  if (resume) $("pause").click();
+  const started = performance.now();
+  try {
+    reel.gen = { key, anim: await generateVideo(params()) };
+    setProgress(null, `Listo en ${((performance.now() - started) / 1000).toFixed(1)} s.`);
+    setView("reel");
+    player.seek(0);
+    player.play();
+  } catch (e) {
+    setProgress(null, e.name === "AbortError" ? "Cancelado." : "Error: " + e.message);
+  } finally {
+    reel.generating = null;
+    if (resume && live.paused) $("pause").click();
+    $("generate").textContent = "Calcular el video";
+    refreshUI();
+  }
+});
+
+// ---------- preview player ----------
+
+let view = "shapes"; // what the preview shows: "reel", "shapes" (live) or "original"
+
+function setView(v) {
+  view = v;
+  for (const b of $("viewMode").children) b.classList.toggle("on", b.dataset.value === v);
+  player.draw();
+}
+$("viewMode").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled) return;
+  reel.backToReel = false; // the person chose
+  setView(b.dataset.value);
+});
+
+const shownReel = () => (view === "reel" ? composition() : null);
+const portionLength = () => Math.max(0.1, reel.portion.end - reel.portion.start);
+
+function reelDuration() {
+  const comp = shownReel();
+  if (comp) return comp.duration;
+  return reel.kind === "video" ? portionLength() : reelSeconds();
+}
+
+const player = (() => {
+  const canvas = $("preview");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  let t = 0, playing = false, last = 0, raf = 0;
+
+  // Keep the hidden <video> on the frame the preview needs at time t.
+  function syncVideo(play) {
+    if (reel.kind !== "video") return;
+    const comp = shownReel();
+    const vt = comp ? comp.videoTime(t) : view === "original" ? t : null;
+    if (vt === null) {
+      srcVideo.pause();
+      return;
+    }
+    const want = reel.portion.start + Math.min(vt, portionLength() - 0.04);
+    if (play) {
+      if (Math.abs(srcVideo.currentTime - want) > 0.25) srcVideo.currentTime = want;
+      if (srcVideo.paused) srcVideo.play().catch(() => {});
+    } else {
+      srcVideo.pause();
+      if (Math.abs(srcVideo.currentTime - want) > 0.01) srcVideo.currentTime = want;
+    }
+  }
+
+  // The reel's sound while it plays (approximate: the export mixes it on
+  // the server, with the exact fade).
+  const audio = $("audioPreview");
+  function syncAudio(play) {
+    const a = audioSource();
+    if (!play || !a || !shownReel()) {
+      audio.pause();
+      return;
+    }
+    if (audio.dataset.src !== a.url) {
+      audio.src = a.url;
+      audio.dataset.src = a.url;
+    }
+    const want = a.start + t;
+    if (Math.abs(audio.currentTime - want) > 0.25) audio.currentTime = want;
+    const dur = reelDuration(), fade = +$("fadeOut").value;
+    const fadeGain = fade > 0 ? clamp((dur - t) / fade, 0, 1) : 1;
+    audio.volume = clamp(+$("volume").value, 0, 1) * fadeGain;
+    if (audio.paused) audio.play().catch(() => {});
+  }
+
+  function draw() {
+    const box = $("phone");
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(9, Math.round(box.clientWidth * dpr)), h = Math.max(16, Math.round(box.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      $("overlay").width = w;
+      $("overlay").height = h;
+      drawOverlay();
+    }
+    const dur = reelDuration();
+    t = clamp(t, 0, dur);
+    const comp = shownReel();
+    if (!reel.kind) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, w, h);
+    } else if (comp) {
+      renderReel(ctx, comp, t, w, h);
+    } else if (view === "shapes") {
+      drawFramed(ctx, w, h, paintLive);
+    } else {
+      drawFramed(ctx, w, h, paintOriginalPanels);
+    }
+    $("seek").max = dur;
+    $("seek").value = t;
+    $("clock").textContent = `${fmtTime(t)} / ${fmtTime(dur)}`;
+  }
+
+  function tick(now) {
+    raf = 0;
+    if (!playing) return;
+    t += (now - last) / 1000;
+    last = now;
+    if (t >= reelDuration()) t = 0;
+    syncVideo(true);
+    syncAudio(true);
+    draw();
+    raf = requestAnimationFrame(tick);
+  }
+
+  function play() {
+    if (!reel.kind) return;
+    playing = true;
+    $("play").textContent = "❚❚";
+    last = performance.now();
+    syncVideo(true);
+    syncAudio(true);
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+
+  function pause() {
+    playing = false;
+    $("play").textContent = "▶";
+    syncVideo(false);
+    syncAudio(false);
+    draw();
+  }
+
+  function seek(x) {
+    t = clamp(x, 0, reelDuration());
+    syncVideo(playing);
+    syncAudio(playing);
+    draw();
+  }
+
+  $("play").addEventListener("click", () => (playing ? pause() : play()));
+  $("seek").addEventListener("input", () => seek(+$("seek").value));
+  srcVideo.addEventListener("seeked", () => { if (!playing) draw(); });
+  srcVideo.addEventListener("loadeddata", () => draw());
+  new ResizeObserver(() => draw()).observe($("phone"));
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && e.target === document.body && reel.kind) {
+      e.preventDefault();
+      playing ? pause() : play();
+    }
+  });
+  return { draw, play, pause, seek, get playing() { return playing; }, get time() { return t; } };
+})();
+
+// Areas the apps cover with their own buttons and captions.
+function drawOverlay() {
+  const SAFE = Templates.SAFE;
+  const c = $("overlay"), g = c.getContext("2d");
+  const w = c.width, h = c.height;
+  g.clearRect(0, 0, w, h);
+  if (!$("safeZones").checked || !reel.kind) return;
+  g.fillStyle = "rgba(255, 90, 90, 0.18)";
+  g.strokeStyle = "rgba(255, 120, 120, 0.7)";
+  g.lineWidth = Math.max(1, w / 400);
+  g.setLineDash([w / 80, w / 120]);
+  const zones = [
+    [0, 0, w, h * SAFE.top, "Barra superior"],
+    [0, h * (1 - SAFE.bottom), w, h * SAFE.bottom, "Texto y nombre de la cuenta"],
+    [w * (1 - SAFE.right), h * SAFE.rightFrom, w * SAFE.right, h * (1 - SAFE.bottom - SAFE.rightFrom), "Botones"],
+  ];
+  g.font = `${Math.round(h / 60)}px system-ui, sans-serif`;
+  for (const [x, y, zw, zh, label] of zones) {
+    g.fillRect(x, y, zw, zh);
+    g.strokeRect(x, y, zw, zh);
+    g.save();
+    g.fillStyle = "rgba(255, 220, 220, 0.85)";
+    if (zw < w / 2) {
+      g.translate(x + zw / 2 + h / 160, y + zh / 2);
+      g.rotate(-Math.PI / 2);
+      g.textAlign = "center";
+      g.fillText(label, 0, 0);
+    } else {
+      g.fillText(label, x + w / 40, y + zh / 2 + h / 160);
+    }
+    g.restore();
+  }
+}
+$("safeZones").addEventListener("input", drawOverlay);
+
+// ---------- template cards ----------
+
+const cards = (() => {
+  const list = [];
+  for (const id of ["auto", ...Object.keys(Templates.LIST)]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tpl";
+    b.dataset.value = id;
+    const canvas = document.createElement("canvas");
+    canvas.width = 108;
+    canvas.height = 192;
+    const label = document.createElement("span");
+    b.append(canvas, label);
+    $("templates").append(b);
+    b.addEventListener("click", () => {
+      reel.template = id;
+      applyBase();
+      restartLiveSoon(); // the region may change shape (9:16 / 9:8)
+      if (reel.kind === "video") applyDuration();
+      refreshUI();
+      player.seek(0);
+    });
+    list.push({ id, b, canvas, label, ctx: canvas.getContext("2d", { alpha: false }), bufs: buffers() });
+  }
+  const resolved = (c) => (c.id === "auto" ? Templates.auto(reel.kind) : c.id);
+
+  function drawCard(c, now) {
+    const comp = composition(resolved(c), false); // the cards show the templates, without the ending
+    const { ctx, canvas } = c;
+    if (comp) {
+      renderReel(ctx, comp, (now / 1000) % comp.duration, canvas.width, canvas.height, c.bufs);
+    } else if (reel.kind) {
+      drawFramed(ctx, canvas.width, canvas.height, paintOriginalPanels, c.bufs);
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  // Animate the cards (at a low frame rate) while there's something to show.
+  let raf = 0, last = 0;
+  function frame(now) {
+    raf = 0;
+    if (document.hidden || !reel.gen) return;
+    if (now - last >= 1000 / 20) {
+      last = now;
+      for (const c of list) if (!c.b.hidden) drawCard(c, now);
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  document.addEventListener("visibilitychange", () => update());
+
+  function update() {
+    for (const c of list) {
+      c.b.hidden = !!reel.kind && c.id !== "auto" && !Templates.LIST[c.id].kinds.includes(reel.kind);
+      c.b.classList.toggle("on", c.id === reel.template);
+      c.label.textContent = c.id === "auto"
+        ? "Automático" + (reel.kind ? ` (${Templates.LIST[Templates.auto(reel.kind)].name})` : "")
+        : Templates.LIST[c.id].name;
+      if (!c.b.hidden) drawCard(c, performance.now());
+    }
+    if (reel.gen && !raf) raf = requestAnimationFrame(frame);
+  }
+  return { update };
+})();
+
+// ---------- duration ----------
+
+// Videos: the duration chooses the portion's length (keeping its start).
+function applyDuration() {
+  if (reel.kind !== "video") return;
+  const dur = reel.video.info.duration;
+  const len = clamp(reelSeconds() / portionFactor(), 0.5, Math.min(MAX_PORTION, dur));
+  const start = clamp(reel.portion.start, 0, dur - len);
+  setPortion(start, start + len);
+}
+
+$("durPreset").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  reel.duration.preset = b.dataset.value;
+  reel.touched.add("duration");
+  applyDuration();
+  refreshUI();
+  player.seek(0);
+});
+$("ending").addEventListener("input", () => {
+  reel.ending = +$("ending").value;
+  reel.touched.add("ending");
+  refreshUI();
+  if (!player.playing) player.draw();
+});
+// Back to the template's base value (and following it when switching).
+$("endingAuto").addEventListener("input", () => {
+  if ($("endingAuto").checked) {
+    reel.touched.delete("ending");
+    reel.ending = Templates.LIST[templateId()].base.ending ?? null;
+  } else {
+    reel.touched.add("ending");
+  }
+  refreshUI();
+  if (!player.playing) player.draw();
+});
+
+$("durFree").addEventListener("input", () => {
+  reel.duration.free = +$("durFree").value;
+  reel.touched.add("duration");
+  applyDuration();
+  refreshUI();
+  player.draw();
+});
+
+// ---------- template base configuration ----------
+
+const PRESETS = ["10", "15", "30", "60"];
+
+// Load the chosen template's base configuration into the controls, except
+// what was changed by hand (force: everything, back to the base).
+function applyBase(force = false) {
+  if (!reel.kind) return;
+  const id = templateId(), base = Templates.LIST[id].base;
+  if (force) reel.touched.clear();
+  const touched = reel.touched;
+  if (!touched.has("duration")) {
+    const v = String(base.duration);
+    reel.duration = PRESETS.includes(v) ? { ...reel.duration, preset: v } : { preset: "free", free: base.duration };
+    $("durFree").value = reel.duration.free;
+    applyDuration();
+  }
+  let changed = false;
+  if (!touched.has("shapes") && +$("shapes").value !== base.shapes) {
+    $("shapes").value = base.shapes;
+    changed = true;
+  }
+  if (!touched.has("mode") && params().mode !== base.mode) {
+    for (const x of $("mode").children) x.classList.toggle("on", +x.dataset.value === base.mode);
+    changed = true;
+  }
+  if (!touched.has("build")) {
+    $("recOrder").value = base.build.order;
+    $("recCurve").value = base.build.curve;
+    $("recEffect").value = base.build.effect;
+    $("recEffectTime").value = base.build.effectTime;
+    for (const sel of ["recOrder", "recCurve", "recEffect"]) $(sel).dispatchEvent(new Event("change"));
+    Picker.refresh();
+  }
+  if (!touched.has("ending")) reel.ending = base.ending ?? null;
+  if (!touched.has("phrases")) reel.phrases = Templates.phrasesFor(id, reel.phrases);
+  reel.base = id;
+  renderPhrases();
+  if (changed) sendParams();
+  else refreshUI();
+}
+$("restoreBase").addEventListener("click", () => {
+  applyBase(true);
+  player.seek(0);
+});
+
+// Changing these by hand keeps them when switching templates.
+$("shapes").addEventListener("input", () => reel.touched.add("shapes"));
+$("mode").addEventListener("click", (e) => { if (e.target.closest("button")) reel.touched.add("mode"); });
+for (const id of ["recOrder", "recCurve", "recEffect", "recEffectTime"]) $(id).addEventListener("input", () => reel.touched.add("build"));
+
+// ---------- phrases ----------
+
+const ROLE_NAMES = { title: "Título", closing: "Cierre" };
+
+// Length of the reel as it would play now, for the phrases' seconds.
+function reelLength() {
+  return composition()?.duration ?? (reel.kind === "video" ? portionLength() * portionFactor() : reelSeconds());
+}
+
+function phrasesChanged(layout) {
+  if (layout) reel.touched.add("phrases");
+  refreshUI();
+  if (!player.playing) player.draw();
+}
+
+// One card per phrase: text, position, style, and when it shows (seconds).
+function renderPhrases() {
+  const box = $("phrases");
+  box.replaceChildren();
+  reel.phrases.forEach((p, i) => {
+    const card = document.createElement("div");
+    card.className = "phrase";
+    const role = Object.assign(document.createElement("span"), { className: "role", textContent: ROLE_NAMES[p.role] ?? `Frase ${i + 1}` });
+    const text = Object.assign(document.createElement("textarea"), { rows: 2, value: p.text, placeholder: p.role === "title" ? "Ej.: La Mona Lisa con {formas} {tipo}" : p.role === "closing" ? "Ej.: ¿Cuál hago mañana? 👇" : "Texto" });
+    text.dataset.role = p.role;
+    text.addEventListener("input", () => { p.text = text.value; phrasesChanged(false); });
+    const select = (options, value, key) => {
+      const sel = document.createElement("select");
+      sel.append(...Object.entries(options).map(([v, label]) => new Option(label, v, false, v === value)));
+      sel.addEventListener("input", () => { p[key] = sel.value; phrasesChanged(true); });
+      return sel;
+    };
+    const del = Object.assign(document.createElement("button"), { type: "button", className: "del", textContent: "✕", title: "Quitar" });
+    del.addEventListener("click", () => {
+      reel.phrases.splice(i, 1);
+      renderPhrases();
+      phrasesChanged(true);
+    });
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.append(select(Templates.POSITIONS, p.pos, "pos"), select(Templates.STYLES, p.style, "style"), del);
+    const times = document.createElement("div");
+    times.className = "times";
+    for (const [key, label] of [["from", "desde"], ["to", "hasta"]]) {
+      const input = Object.assign(document.createElement("input"), { type: "number", min: 0, step: 0.1 });
+      input.dataset.key = key;
+      input.addEventListener("input", () => {
+        p[key] = clamp(+input.value / reelLength(), 0, 1);
+        if (key === "to") delete p.extend; // an explicit end
+        phrasesChanged(true);
+      });
+      times.append(Object.assign(document.createElement("span"), { textContent: label }), input);
+    }
+    card.append(role, text, meta, times);
+    card._phrase = p;
+    box.append(card);
+  });
+  syncPhraseTimes();
+}
+
+// Seconds shown for each phrase (they follow the duration).
+function syncPhraseTimes() {
+  const L = reelLength();
+  for (const card of $("phrases").children) {
+    for (const input of card.querySelectorAll("input[type=number]")) {
+      if (input === document.activeElement) continue;
+      input.max = L.toFixed(1);
+      input.value = (card._phrase[input.dataset.key] * L).toFixed(1);
+    }
+  }
+}
+
+$("addPhrase").addEventListener("click", () => {
+  reel.phrases.push({ role: "extra", text: "", from: 0.3, to: 0.6, pos: "middle", style: "subtitle" });
+  renderPhrases();
+  phrasesChanged(true);
+  $("phrases").lastElementChild.querySelector("textarea").focus();
+});
+$("tBrand").addEventListener("input", () => phrasesChanged(false));
+
+// ---------- loading a source ----------
+
+async function loadSource(file) {
+  if (!file) return;
+  const isVideo = file.type.startsWith("video/");
+  if (!isVideo && !file.type.startsWith("image/")) {
+    alert("Subí una foto o un video.");
+    return;
+  }
+  reel.generating?.cancel();
+  closeLive();
+  closeVariants();
+  player.pause();
+  if (reel.url) URL.revokeObjectURL(reel.url);
+  Object.assign(reel, { kind: null, name: file.name, file, url: URL.createObjectURL(file), img: null, video: null, gen: null, shown: false });
+  reel.framing = { mode: reel.framing.mode, zoom: 1, px: 0.5, py: 0.5 };
+  $("stats").textContent = isVideo ? "Subiendo el video…" : "Cargando la foto…";
+  setProgress(null, "");
+  try {
+    if (isVideo) {
+      const form = new FormData();
+      form.append("video", file);
+      const d = await api("/api/videos", { method: "POST", body: form });
+      srcVideo.src = reel.url;
+      await new Promise((res, rej) => {
+        srcVideo.onloadedmetadata = res;
+        srcVideo.onerror = () => rej(new Error("el navegador no puede reproducir este video"));
+      });
+      reel.video = d;
+      reel.kind = "video";
+      for (const id of ["pStart", "pEnd"]) $(id).max = d.info.duration.toFixed(2);
+      reel.portion = { start: 0, end: 0 };
+      applyDuration();
+    } else {
+      const img = new Image();
+      img.src = reel.url;
+      await img.decode();
+      reel.img = img;
+      reel.kind = "image";
+    }
+  } catch (e) {
+    $("stats").textContent = "Error: " + e.message;
+    return;
+  }
+  // Default sound: the video's own, if it has one.
+  if (reel.audio.mode !== "file") reel.audio.mode = reel.video?.info.hasAudio ? "source" : "none";
+  const [w, h] = sourceSize();
+  $("sourceInfo").textContent = `${file.name} · ${w}×${h}` + (reel.video ? ` · ${fmtTime(reel.video.info.duration)}` + (reel.video.info.hasAudio ? " · con sonido" : "") : "");
+  if (reel.video) {
+    fillKFPS(reel.video.info.fps || 30);
+    $("testFrame").value = (reel.portion.start + reel.portion.end) / 2; // as the editor: a frame from the middle
+    reel.testFrames = [+$("testFrame").value];
+  }
+  closeLive();
+  applyBase();
+  setView("shapes");
+  syncFramingInputs();
+  refreshUI();
+  player.seek(0);
+  startLive();
+}
+
+function fillKFPS(fps) {
+  const keep = +$("kfps").value || 8;
+  const opts = [4, 6, 8, 10, 12, 15, 24, 30].filter((f) => f <= fps + 0.5);
+  $("kfps").replaceChildren(...opts.map((f) => new Option(String(f), f)));
+  $("kfps").value = String(opts.includes(keep) ? keep : opts.at(-1) ?? 4);
+}
+
+$("file").addEventListener("change", (e) => {
+  loadSource(e.target.files[0]);
+  e.target.value = "";
+});
+const phone = $("phone");
+phone.addEventListener("dragover", (e) => { e.preventDefault(); phone.classList.add("dragging"); });
+phone.addEventListener("dragleave", () => phone.classList.remove("dragging"));
+phone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  phone.classList.remove("dragging");
+  loadSource(e.dataTransfer.files[0]);
+});
+$("dropHint").addEventListener("click", () => $("file").click());
+
+// ---------- portion of the video ----------
+
+function setPortion(s, e) {
+  reel.portion = { start: Math.round(s * 100) / 100, end: Math.round(e * 100) / 100 };
+  $("pStart").value = reel.portion.start;
+  $("pEnd").value = reel.portion.end;
+  // The test frame stays inside the portion (in the middle when it was out).
+  const tf = $("testFrame"), old = +tf.value;
+  tf.min = reel.portion.start;
+  tf.max = reel.portion.end;
+  if (old < reel.portion.start || old > reel.portion.end) tf.value = (reel.portion.start + reel.portion.end) / 2;
+  reel.testFrames = reel.testFrames.filter((t) => t >= reel.portion.start && t <= reel.portion.end);
+  if (!reel.testFrames.length) reel.testFrames.push(+tf.value);
+  drawTestFrames();
+  if (+tf.value !== old) restartLiveSoon();
+}
+
+$("testFrame").addEventListener("input", () => {
+  // Show it while choosing; the shapes follow once the hand stops.
+  setView("original");
+  player.pause();
+  player.seek(testTime() - reel.portion.start);
+  refreshUI();
+  drawTestFrames();
+  restartLiveSoon();
+});
+
+// ---------- test frames (as in the editor) ----------
+
+// Moments of the video kept to try the settings on; each keeps its own
+// session (paused while another one is shown).
+const frameURL = (t, size) => `/api/videos/${reel.video.id}/frame?t=${t.toFixed(2)}&size=${size}`;
+const sameTime = (a, b) => Math.abs(a - b) < 0.015;
+
+function drawTestFrames() {
+  if (reel.kind !== "video") {
+    $("testFrames").replaceChildren();
+    return;
+  }
+  const now = testTime();
+  $("addTestFrame").disabled = reel.testFrames.some((t) => sameTime(t, now));
+  $("testFrames").replaceChildren(...reel.testFrames.map((t, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "frame" + (sameTime(t, now) ? " on" : "");
+    b.title = "Probar en este frame";
+    b.innerHTML = `<img src="${frameURL(t, 320)}" alt=""><span>${fmtTime(t)}</span>` + (reel.testFrames.length > 1 ? `<i title="Quitar">×</i>` : "");
+    b.addEventListener("click", (e) => {
+      if (e.target.tagName === "I") removeTestFrame(i);
+      else selectTestFrame(t);
+    });
+    return b;
+  }));
+}
+
+function selectTestFrame(t) {
+  $("testFrame").value = t;
+  setView("shapes");
+  player.pause();
+  player.seek(testTime() - reel.portion.start);
+  drawTestFrames();
+  refreshUI();
+  startLive();
+}
+
+function removeTestFrame(i) {
+  const [t] = reel.testFrames.splice(i, 1);
+  if (sameTime(t, testTime())) selectTestFrame(reel.testFrames[Math.min(i, reel.testFrames.length - 1)]);
+  else drawTestFrames();
+}
+
+$("addTestFrame").addEventListener("click", () => {
+  const t = testTime();
+  if (reel.testFrames.some((x) => sameTime(x, t))) return;
+  reel.testFrames.push(t);
+  reel.testFrames.sort((a, b) => a - b);
+  drawTestFrames();
+});
+
+function onPortion(changed) {
+  const dur = reel.video.info.duration;
+  let s = +$("pStart").value, e = +$("pEnd").value;
+  // Keep at least half a second and at most MAX_PORTION, moving the other end.
+  if (changed === "start") {
+    s = clamp(s, 0, dur - 0.5);
+    e = clamp(e, s + 0.5, Math.min(dur, s + MAX_PORTION));
+  } else {
+    e = clamp(e, 0.5, dur);
+    s = clamp(s, Math.max(0, e - MAX_PORTION), e - 0.5);
+  }
+  setPortion(s, e);
+  // Choosing the portion by hand sets a free duration.
+  reel.duration = { preset: "free", free: Math.round((e - s) * portionFactor() * 10) / 10 };
+  reel.touched.add("duration");
+  $("durFree").value = reel.duration.free;
+  // Show the frame being chosen.
+  setView("original");
+  player.pause();
+  player.seek(changed === "start" ? 0 : e - s);
+  refreshUI();
+}
+$("pStart").addEventListener("input", () => onPortion("start"));
+$("pEnd").addEventListener("input", () => onPortion("end"));
+
+// ---------- framing controls ----------
+
+function syncFramingInputs() {
+  $("zoom").value = reel.framing.zoom;
+  $("panX").value = reel.framing.px;
+  $("panY").value = reel.framing.py;
+  for (const b of $("fitMode").children) b.classList.toggle("on", b.dataset.value === reel.framing.mode);
+}
+
+function framingChanged() {
+  refreshUI();
+  player.draw();
+  restartLiveSoon();
+}
+
+$("fitMode").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  reel.framing.mode = b.dataset.value;
+  syncFramingInputs();
+  framingChanged();
+});
+for (const [id, key] of [["zoom", "zoom"], ["panX", "px"], ["panY", "py"]]) {
+  $(id).addEventListener("input", () => {
+    reel.framing[key] = +$(id).value;
+    framingChanged();
+  });
+}
+
+// Drag the preview to move the framing; wheel to zoom.
+(() => {
+  const canvas = $("preview");
+  let drag = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (reel.framing.mode !== "fill" || !reel.kind) return;
+    drag = { x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add("panning");
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const [w, h] = sourceSize();
+    const c = crop();
+    // The content follows the pointer: the crop moves the other way.
+    const dx = ((e.clientX - drag.x) / canvas.clientWidth) * c.w * w;
+    const dy = ((e.clientY - drag.y) / canvas.clientHeight) * c.h * h;
+    const freeX = w * (1 - c.w), freeY = h * (1 - c.h);
+    if (freeX > 0.5) reel.framing.px = clamp(reel.framing.px - dx / freeX, 0, 1);
+    if (freeY > 0.5) reel.framing.py = clamp(reel.framing.py - dy / freeY, 0, 1);
+    drag = { x: e.clientX, y: e.clientY };
+    syncFramingInputs();
+    framingChanged();
+  });
+  const end = () => { drag = null; canvas.classList.remove("panning"); };
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+  canvas.addEventListener("wheel", (e) => {
+    if (reel.framing.mode !== "fill" || !reel.kind) return;
+    e.preventDefault();
+    reel.framing.zoom = clamp(reel.framing.zoom * Math.exp(-e.deltaY * 0.001), 1, 3);
+    syncFramingInputs();
+    framingChanged();
+  }, { passive: false });
+})();
+
+// ---------- shape controls ----------
+
+$("mode").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  for (const x of $("mode").children) x.classList.toggle("on", x === b);
+  sendParams();
+});
+for (const id of ["shapes", "alpha", "alphaAuto", "repeat", "inputSize", "background", "bgAuto"]) {
+  $(id).addEventListener("input", sendParams);
+}
+// Settings that apply at once, without finding shapes again.
+for (const id of ["kfps", "adapt", "videoFlow", "interp", "recOrder", "recCurve", "recEffect", "recEffectTime"]) {
+  $(id).addEventListener("input", () => {
+    refreshUI();
+    if (!player.playing) player.draw();
+  });
+}
+
+// The recording options with their visual previews, as in the editor.
+(() => {
+  const fill = (id, entries) => $(id).replaceChildren(...entries.map(([v, label]) => new Option(label, v)));
+  fill("recOrder", Object.entries(Build.ORDERS));
+  fill("recCurve", Object.entries(Build.CURVES).map(([k, c]) => [k, c.label]));
+  fill("recEffect", Object.entries(Build.EFFECTS));
+  $("recCurve").value = "outCubic";
+  $("recEffect").value = "fade";
+  // Previews use the current shapes: short loops, so each card tells its story fast.
+  const thumb = () => reel.gen?.image ?? (live.img && reel.kind === "image" ? { ...live.img, shapes: live.img.shapes.filter(Boolean) } : null);
+  const quick = () => ({ direction: "build", ...buildOpts(), duration: 2.2, holdStart: 0.2, holdEnd: 0.8, effectTime: Math.min(+$("recEffectTime").value, 0.6) });
+  const variant = (key) => (value) => (thumb()?.shapes.length ? Build.plan(thumb(), { ...quick(), [key]: value }) : null);
+  Picker.attach($("recOrder"), variant("order"));
+  // Curves: the plot of the curve, or the build playing with it.
+  const curveView = Picker.curveToggle($("curveView"), "result");
+  Picker.attach($("recCurve"), (value) => {
+    if (curveView() === "result") return variant("curve")(value);
+    if (value !== "impact") return Picker.curve(Build.CURVES[value].f);
+    return thumb()?.shapes.length ? Picker.curve(Build.plan(thumb(), { ...quick(), curve: "impact" }).ease) : null;
+  });
+  Picker.attach($("recEffect"), variant("effect"));
+  for (const id of ["recOrder", "recCurve", "recEffect", "recEffectTime"]) $(id).addEventListener("input", () => Picker.refresh());
+})();
+
+// ---------- state shown in the panel ----------
+
+function refreshUI() {
+  if (typeof drawPresets === "function" && presetsReady) drawPresets();
+  const has = !!reel.kind;
+  $("controls").disabled = !has;
+  $("dropHint").hidden = has;
+  $("portion").hidden = reel.kind !== "video";
+  $("fillControls").hidden = reel.framing.mode !== "fill";
+  $("zoomOut").textContent = (+reel.framing.zoom).toFixed(2) + "×";
+  $("shapesOut").textContent = $("shapes").value;
+  $("inputSizeOut").textContent = $("inputSize").value + " px";
+  $("alphaOut").textContent = $("alphaAuto").checked ? "auto" : $("alpha").value;
+  $("alpha").disabled = $("alphaAuto").checked;
+  $("repeatOut").textContent = $("repeat").value;
+  $("background").disabled = $("bgAuto").checked;
+  $("adaptOut").textContent = $("adapt").value;
+  $("recEffectTimeOut").textContent = (+$("recEffectTime").value).toFixed(2) + " s";
+  $("recEffectTime").disabled = $("recEffect").value === "none";
+  $("photoAnim").hidden = reel.kind === "video";
+  $("videoAnim").hidden = reel.kind !== "video";
+  $("testFrameBox").hidden = reel.kind !== "video";
+  if (reel.kind === "video") $("testFrameOut").textContent = fmtTime(testTime());
+  drawOverlay();
+
+  // The live session, as in the editor.
+  const target = +$("shapes").value;
+  $("pause").textContent = live.paused ? "Continuar" : "Pausar";
+  if (has && live.id && live.running && !live.paused) Busy.set("shapes", Math.min(live.count, target) / target, "Formas");
+  else Busy.done("shapes");
+  if (has) {
+    const n = Math.min(live.count, target);
+    $("liveStatus").textContent = !live.id ? "Preparando…"
+      : `Formas: ${n} / ${target} · ` + (live.paused ? "en pausa" : live.running ? "buscando…" : n >= target ? "listas" : "detenido") +
+        (reel.kind === "image" && reel.gen && !stale() ? " · el reel ya las usa" : "");
+    const want = wantedVariants();
+    if (want.length) {
+      const done = want.filter((m) => variants.list.get(m)?.done && variants.list.get(m).key === variantKey(m)).length;
+      $("liveStatus").textContent += ` · otros tipos de forma: ${done} / ${want.length} listos`;
+    }
+  }
+  syncVariantsSoon();
+
+  // Template and duration.
+  const tpl = Templates.LIST[templateId()];
+  $("tplInfo").textContent = has ? tpl.desc : "Subí una fuente para ver los templates.";
+  $("restoreBase").hidden = !has || reel.touched.size === 0;
+  syncPhraseTimes();
+  for (const b of $("durPreset").children) b.classList.toggle("on", b.dataset.value === reel.duration.preset);
+  $("durFreeBox").hidden = reel.duration.preset !== "free";
+  if (reel.kind === "video") {
+    const { start, end } = reel.portion;
+    const dur = reel.video.info.duration;
+    const len = end - start, total = len * portionFactor();
+    $("portionOut").textContent = `${fmtTime(start)} – ${fmtTime(end)} (${len.toFixed(1)} s)`;
+    $("portionSel").style.left = (100 * start) / dur + "%";
+    $("portionSel").style.width = (100 * len) / dur + "%";
+    $("durInfo").textContent = `El reel dura ${total.toFixed(1)} s` +
+      (portionFactor() > 1 ? ` (${len.toFixed(1)} s del video, de ida y de vuelta)` : "") +
+      (total < reelSeconds() - 0.05 ? ". El video no alcanza para más." : ".");
+  } else {
+    $("durInfo").textContent = has ? `El reel dura ${reelSeconds()} s; los tiempos del template se ajustan solos.` : "";
+  }
+  // How long the original shows at the end (templates that end with it).
+  const endsWithOriginal = !!Templates.LIST[templateId()]?.ending;
+  $("endingBox").hidden = !endsWithOriginal || !has;
+  if (endsWithOriginal && has) {
+    const comp = composition();
+    const length = comp?.duration ?? reelSeconds();
+    $("ending").max = Math.max(1, Math.floor(length * 0.85 * 2) / 2);
+    const fromBase = !reel.touched.has("ending");
+    $("endingAuto").checked = fromBase;
+    const shown = reel.ending ?? (comp && Number.isFinite(comp.originalFrom) ? (comp.main ?? comp.duration) - comp.originalFrom : null);
+    if (shown != null) $("ending").value = Math.round(shown * 2) / 2;
+    $("endingOut").textContent = shown == null ? "" : (shown <= 0 ? "0 s · sin original" : `${(+shown).toFixed(1)} s`) + (fromBase ? " (base del template)" : "");
+  }
+
+  drawOutroUI();
+
+  // Audio and export.
+  const canSource = !!reel.video?.info.hasAudio;
+  if (reel.audio.mode === "source" && !canSource) reel.audio.mode = "none";
+  for (const b of $("audioMode").children) {
+    b.classList.toggle("on", b.dataset.value === reel.audio.mode);
+    if (b.dataset.value === "source") b.disabled = !canSource;
+  }
+  $("audioFileBox").hidden = reel.audio.mode !== "file";
+  $("audioLevels").hidden = reel.audio.mode === "none";
+  $("volumeOut").textContent = Math.round(+$("volume").value * 100) + " %";
+  $("fadeOutOut").textContent = (+$("fadeOut").value).toFixed(1) + " s";
+
+  const comp = composition();
+  if (!exporting) {
+    $("export").disabled = !comp || !!$("export").dataset.closed; // closed: a refined reel already sent to the queue
+    if (has && !comp) $("expStatus").textContent = reel.kind === "image" ? "Esperá a que estén todas las formas para exportar." : "Calculá el video para poder exportar.";
+    else if (has && !$("expStatus").dataset.done) $("expStatus").textContent = `Reel de ${comp.duration.toFixed(1)} s · ${Templates.LIST[comp.id].name} · 1080×1920, 30 fps.` + (audioSource() ? "" : " ⚠ Sin audio: elegí una canción en la sección Audio.");
+  }
+  $("viewMode").querySelector('[data-value="reel"]').disabled = !comp;
+  // While the shapes are found again the reel can't show: back to it when ready.
+  if (view === "reel" && !comp) {
+    setView("shapes");
+    reel.backToReel = true;
+  } else if (reel.backToReel && comp && view === "shapes") {
+    reel.backToReel = false;
+    setView("reel");
+  }
+  if (!reel.generating && reel.kind === "video") {
+    if (stale()) $("genStatus").innerHTML = '<span class="stale">Cambiaste el encuadre, el tramo o los ajustes: calculá el video de nuevo para ver el reel.</span>';
+    else if (!reel.gen) $("genStatus").textContent = "Cuando te guste cómo queda en los frames de prueba, calculá el video.";
+  }
+  if (has) {
+    const c = crop();
+    $("stats").textContent = `${reel.kind === "image" ? "Foto" : "Video"} · ${tpl.name} · ` +
+      (c ? `recorte ${Math.round(c.w * 100)}% × ${Math.round(c.h * 100)}% del original` : "completa, con fondo desenfocado");
+  }
+  cards.update();
+}
+
+
+// ---------- audio ----------
+
+// Where the sound comes from: { url (for the preview), start }; null if none.
+function audioSource() {
+  const a = reel.audio;
+  if (a.mode === "file" && a.url) return { url: a.url, start: Math.max(0, +$("audioStart").value || 0) };
+  if (a.mode === "source" && reel.video?.info.hasAudio) return { url: reel.url, start: reel.portion.start };
+  return null;
+}
+
+$("audioMode").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled) return;
+  reel.audio.mode = b.dataset.value;
+  refreshUI();
+  player.seek(player.time);
+});
+$("audioFile").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
+  Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f), bank: null });
+  $("audioName").textContent = f.name;
+  e.target.value = "";
+  refreshUI();
+});
+for (const id of ["volume", "fadeOut", "audioStart"]) $(id).addEventListener("input", refreshUI);
+
+// ---------- audio bank ----------
+
+// The songs of the bank folder: listen to one, use it. The one used is kept
+// with the reel (and with a preset saved from it), like any song.
+const bank = { items: null, dir: "", exists: true, listening: null };
+const bankPlayer = new Audio();
+bankPlayer.addEventListener("ended", () => { bank.listening = null; drawBank(); });
+
+async function loadBank() {
+  try {
+    const o = await (await fetch("/api/audios")).json();
+    Object.assign(bank, { items: o.items, dir: o.dir, exists: o.exists });
+  } catch {
+    bank.items = [];
+  }
+  drawBank();
+}
+
+const bankURL = (name) => "/api/audios/files/" + name.split("/").map(encodeURIComponent).join("/");
+
+function drawBank() {
+  if (!bank.items) return;
+  const q = $("bankSearch").value.trim().toLowerCase();
+  const shown = bank.items.filter((it) => it.name.toLowerCase().includes(q));
+  $("bankCount").textContent = bank.items.length ? `(${bank.items.length})` : "";
+  $("bankSearch").hidden = bank.items.length < 6;
+  $("bankInfo").textContent = !bank.exists
+    ? `No encuentro la carpeta ${bank.dir}: revisá AUDIOS_HOST_DIR en el .env y recreá el contenedor.`
+    : !bank.items.length ? `Dejá canciones (mp3, m4a, wav…) en ${bank.dir} y tocá ↻.` : "";
+  $("bankList").replaceChildren(...shown.map((it) => {
+    const row = document.createElement("div");
+    row.className = "bank-row" + (reel.audio.mode === "file" && reel.audio.bank === it.name ? " on" : "");
+    const listen = Object.assign(document.createElement("button"), {
+      className: "listen", textContent: bank.listening === it.name ? "■" : "▶", title: "Escuchar",
+    });
+    listen.addEventListener("click", () => {
+      if (bank.listening === it.name) {
+        bankPlayer.pause();
+        bank.listening = null;
+      } else {
+        bankPlayer.src = bankURL(it.name);
+        bankPlayer.play().catch(() => {});
+        bank.listening = it.name;
+      }
+      drawBank();
+    });
+    const dir = it.name.includes("/") ? it.name.slice(0, it.name.lastIndexOf("/") + 1) : "";
+    const name = Object.assign(document.createElement("button"), { className: "name", title: "Usar en el reel" });
+    name.append(Object.assign(document.createElement("small"), { textContent: dir }), it.name.slice(dir.length).replace(/\.[^.]+$/, ""));
+    name.addEventListener("click", () => useBankAudio(it.name));
+    row.append(listen, name);
+    return row;
+  }));
+  if (q && !shown.length) $("bankList").append(Object.assign(document.createElement("p"), { className: "hint", textContent: "Nada con ese nombre." }));
+  $("bankList").append(Object.assign(document.createElement("button"), { className: "reload", textContent: "↻", title: "Volver a leer la carpeta", onclick: loadBank }));
+}
+
+async function useBankAudio(name) {
+  bankPlayer.pause();
+  bank.listening = null;
+  $("audioName").textContent = "Cargando " + name + "…";
+  try {
+    const res = await fetch(bankURL(name));
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const f = new File([blob], name.split("/").pop(), { type: blob.type });
+    if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
+    Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f), bank: name });
+    $("audioName").textContent = f.name + " (del banco)";
+    $("audioStart").value = 0;
+  } catch (e) {
+    $("audioName").textContent = "No se pudo cargar: " + e.message;
+  }
+  drawBank();
+  refreshUI();
+  player.seek(player.time);
+}
+
+$("bankSearch").addEventListener("input", drawBank);
+loadBank();
+
+// ---------- brand ending: controls ----------
+
+let logoVersion = 0;
+const OUTRO_HINT = "El logo se arma con formas, como los reels (con el tipo de forma de la sección Formas).";
+
+// As saved with the reel and its presets: the logo goes with its picture
+// (small) and its shapes, so it's drawn again without computing anything.
+function outroRecord() {
+  const o = reel.outro, l = o.logo;
+  return { kind: o.kind, seconds: o.seconds, text: o.text, handle: o.handle, logo: l?.image ? { name: l.name, src: l.src, bg: l.bg, shapes: l.shapes, image: l.image } : null };
+}
+
+function setOutro(m) {
+  const o = { kind: "none", seconds: 2.5, text: "", handle: "", logo: null, ...(m ?? {}) };
+  if (o.logo) o.logo = { ...o.logo, version: ++logoVersion };
+  reel.outro = o;
+  $("outroSeconds").value = o.seconds;
+  $("outroText").value = o.text;
+  $("outroHandle").value = o.handle;
+  if (o.logo) {
+    $("outroBg").value = o.logo.bg;
+    $("outroLogoShapes").value = o.logo.shapes;
+  }
+  $("outroLogoStatus").textContent = o.logo?.image ? `Logo: ${o.logo.name} (${o.logo.image.shapes.length} formas).` : OUTRO_HINT;
+}
+
+function drawOutroUI() {
+  const o = reel.outro;
+  for (const b of $("outroKind").children) b.classList.toggle("on", b.dataset.value === o.kind);
+  $("outroBox").hidden = o.kind === "none";
+  $("outroCtaBox").hidden = o.kind !== "cta";
+  $("outroHandleBox").hidden = o.kind !== "handle";
+  $("outroLogoBox").hidden = o.kind !== "logo";
+  $("outroSecondsOut").textContent = (+o.seconds).toFixed(1) + " s";
+  $("outroLogoShapesOut").textContent = $("outroLogoShapes").value;
+  $("outroHandle").placeholder = $("tBrand").value.trim() || "@tucuenta";
+}
+
+const outroChanged = () => {
+  refreshUI();
+  player.seek(player.time);
+};
+$("outroKind").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  reel.outro.kind = b.dataset.value;
+  outroChanged();
+});
+$("outroSeconds").addEventListener("input", () => { reel.outro.seconds = +$("outroSeconds").value; outroChanged(); });
+$("outroText").addEventListener("input", () => { reel.outro.text = $("outroText").value; outroChanged(); });
+$("outroHandle").addEventListener("input", () => { reel.outro.handle = $("outroHandle").value; outroChanged(); });
+$("outroLogoShapes").addEventListener("input", drawOutroUI);
+
+const loadImage = (url) => new Promise((resolve, reject) => {
+  const im = new Image();
+  im.onload = () => resolve(im);
+  im.onerror = () => reject(new Error("no es una imagen que se pueda abrir"));
+  im.src = url;
+});
+
+$("outroLogoFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    // Kept small (with its transparency) to go with the reel and its presets.
+    const url = URL.createObjectURL(f);
+    const im = await loadImage(url);
+    URL.revokeObjectURL(url);
+    const s = Math.min(1, 384 / Math.max(im.naturalWidth, im.naturalHeight));
+    const cv = document.createElement("canvas");
+    cv.width = Math.max(1, Math.round(im.naturalWidth * s));
+    cv.height = Math.max(1, Math.round(im.naturalHeight * s));
+    cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
+    reel.outro.logo = { name: f.name, src: cv.toDataURL("image/png"), bg: $("outroBg").value, shapes: +$("outroLogoShapes").value, image: null, version: ++logoVersion };
+    reel.outro.kind = "logo";
+    computeLogo();
+  } catch (err) {
+    $("outroLogoStatus").textContent = "No se pudo usar el logo: " + err.message;
+  }
+});
+for (const id of ["outroBg", "outroLogoShapes"]) {
+  $(id).addEventListener("change", () => {
+    const l = reel.outro.logo;
+    if (!l?.src) return;
+    Object.assign(l, { bg: $("outroBg").value, shapes: +$("outroLogoShapes").value });
+    computeLogo();
+  });
+}
+
+// The logo's shapes, computed like a photo's (over the chosen background,
+// which fills its transparent parts).
+let logoJob = 0;
+async function computeLogo() {
+  const l = reel.outro.logo, job = ++logoJob;
+  const status = (text) => { if (job === logoJob) $("outroLogoStatus").textContent = text; };
+  status("Armando el logo con formas…");
+  refreshUI();
+  let es = null, id = null, p = null;
+  try {
+    const im = await loadImage(l.src);
+    const cv = document.createElement("canvas");
+    cv.width = im.naturalWidth;
+    cv.height = im.naturalHeight;
+    const g = cv.getContext("2d");
+    g.fillStyle = l.bg;
+    g.fillRect(0, 0, cv.width, cv.height);
+    g.drawImage(im, 0, 0);
+    const form = new FormData();
+    form.append("image", await new Promise((r) => cv.toBlob(r, "image/png")), "logo.png");
+    p = { ...params(), shapes: l.shapes, background: l.bg };
+    form.append("params", JSON.stringify(p));
+    id = (await api("/api/sessions", { method: "POST", body: form })).id;
+    const image = await new Promise((resolve, reject) => {
+      let img = null, gen = null, count = 0, running = true;
+      es = new EventSource(`/api/sessions/${id}/events`);
+      const check = () => {
+        if (job !== logoJob) return reject(new Error("reemplazado"));
+        Busy.set("logo", Math.min(1, count / p.shapes), "Logo");
+        status(`Armando el logo con formas: ${Math.min(count, p.shapes)} / ${p.shapes}`);
+        if (img && !running && count >= p.shapes) resolve({ ...img, shapes: img.shapes.slice(0, p.shapes), scores: img.scores.slice(0, p.shapes) });
+      };
+      es.addEventListener("snapshot", (e) => {
+        const s = JSON.parse(e.data);
+        gen = s.g;
+        img = { width: s.width, height: s.height, background: s.background, baseScore: s.baseScore, shapes: s.data.slice(), scores: s.scores.slice() };
+        count = s.data.length;
+        running = s.running;
+        check();
+      });
+      es.addEventListener("shape", (e) => {
+        const s = JSON.parse(e.data);
+        if (s.g !== gen || !img) return;
+        img.shapes[s.i] = s.data;
+        img.scores[s.i] = s.score;
+        count = Math.max(count, s.i + 1);
+        check();
+      });
+      es.addEventListener("status", (e) => {
+        const s = JSON.parse(e.data);
+        if (s.g !== gen) return;
+        count = s.count;
+        running = s.running;
+        check();
+      });
+    });
+    if (job !== logoJob) return;
+    Object.assign(l, { image, version: ++logoVersion });
+    status(`Logo: ${l.name} (${image.shapes.length} formas).`);
+  } catch (err) {
+    if (err.message !== "reemplazado") status("No se pudo armar el logo: " + err.message);
+  } finally {
+    es?.close();
+    if (id) api(`/api/sessions/${id}/params`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...p, paused: true }) }).catch(() => {});
+    if (job === logoJob) Busy.done("logo");
+  }
+  outroChanged();
+}
+
+// ---------- export ----------
+
+let exporting = null; // AbortController while exporting
+
+// Settings of the reel, stored with it to compare later what works best.
+function reelMeta(comp, res, seconds) {
+  const a = reel.audio;
+  return {
+    v: 1,
+    template: comp.id, templateChoice: reel.template,
+    duration: Math.round(comp.duration * 100) / 100, durationChoice: { ...reel.duration },
+    ending: reel.ending, originalFrom: Number.isFinite(comp.originalFrom) ? Math.round(comp.originalFrom * 100) / 100 : null,
+    source: { kind: reel.kind, name: reel.name, size: sourceSize(), portion: reel.kind === "video" ? { ...reel.portion } : null },
+    ...(reel.kind === "video" ? { testFrames: reel.testFrames.slice(), testFrame: testTime() } : {}),
+    framing: { ...reel.framing }, crop: crop(),
+    shapes: params(),
+    animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
+    base: reel.base, changedByHand: [...reel.touched], lang: reel.lang,
+    phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
+    brand: $("tBrand").value,
+    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, bank: a.mode === "file" ? a.bank : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+    outro: outroRecord(),
+    export: { width: res.width, height: res.height, fps: 30, codec: res.codec, seconds: Math.round(seconds * 10) / 10 },
+  };
+}
+
+// Before drawing frame t, have the hidden <video> on the right frame if the
+// original is visible then.
+async function seekSourceFor(comp, t) {
+  if (reel.kind !== "video" || t < comp.originalFrom) return;
+  const vt = comp.videoTime(t);
+  if (vt === null) return;
+  const want = reel.portion.start + Math.min(vt, portionLength() - 0.04);
+  if (Math.abs(srcVideo.currentTime - want) < 0.001 && srcVideo.readyState >= 2) return;
+  await new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); srcVideo.removeEventListener("seeked", done); resolve(); };
+    const timer = setTimeout(done, 3000);
+    srcVideo.addEventListener("seeked", done);
+    srcVideo.currentTime = want;
+  });
+}
+
+function setExport(fraction, text) {
+  $("expProgress").hidden = fraction === null;
+  if (fraction !== null) $("expProgress").value = fraction;
+  $("expStatus").textContent = text;
+}
+
+// Draw every frame at 1080x1920, encode it and send it with its sound to
+// the server; extra form fields say where it goes (save=1: the library;
+// job=<id>: the generator). onProgress(fraction, text). Returns the answer.
+async function encodeAndSend(comp, extra, signal, onProgress) {
+  const started = performance.now();
+  const bufs = buffers();
+  const res = await Motion.encodeMP4({
+    width: 1080, height: 1920, duration: comp.duration,
+    prepare: (t) => seekSourceFor(comp, t),
+    render: (ctx, t, w, h) => renderReel(ctx, comp, t, w, h, bufs),
+  }, {
+    fps: 30, longSide: 1920, signal,
+    onProgress: (f) => onProgress(f * 0.9, `Codificando: ${Math.round(f * 100)} %`),
+  });
+  const seconds = (performance.now() - started) / 1000;
+  onProgress(0.92, "Agregando el audio y guardando…");
+  const form = new FormData();
+  form.append("video", res.blob, "reel.mp4");
+  const a = reel.audio, src = audioSource();
+  if (src && a.mode === "file") {
+    form.append("audio", a.file);
+    form.append("audioStart", src.start);
+  } else if (src && a.mode === "source") {
+    form.append("source", reel.video.id);
+    form.append("sourceStart", src.start);
+  }
+  form.append("volume", $("volume").value);
+  form.append("fadeOut", $("fadeOut").value);
+  for (const [k, v] of Object.entries(extra)) if (v != null) form.append(k, v);
+  form.append("meta", JSON.stringify(reelMeta(comp, res, seconds)));
+  return api("/api/reels/mux", { method: "POST", body: form, signal });
+}
+
+$("export").addEventListener("click", async () => {
+  if (exporting) {
+    exporting.abort();
+    return;
+  }
+  const comp = composition();
+  if (!comp) return;
+  player.pause();
+  srcVideo.pause();
+  exporting = new AbortController();
+  $("export").textContent = "Cancelar";
+  $("export").disabled = false;
+  delete $("expStatus").dataset.done;
+  const started = performance.now();
+  try {
+    if (MANUAL) {
+      const done = await saveManual(exporting.signal);
+      setExport(null, `${done} en ${((performance.now() - started) / 1000).toFixed(1)} s.`);
+      $("expStatus").dataset.done = "1";
+      return;
+    }
+    if (REFINE) {
+      // The reel in every language, each saved over its version.
+      const done = await saveRefined(exporting.signal);
+      setExport(null, `${done} en ${((performance.now() - started) / 1000).toFixed(1)} s.`);
+      $("expStatus").dataset.done = "1";
+      return;
+    }
+    // Its source goes with it, to edit it again later.
+    const keep = reel.kind === "video" ? { srcVideo: reel.video.id, srcName: reel.name } : { src: reel.file };
+    const entry = await encodeAndSend(comp, { save: "1", ...keep }, exporting.signal, setExport);
+    const link = document.createElement("a");
+    link.href = `/api/reels/${entry.id}/video?download=1`;
+    link.download = `reel-${entry.id}.mp4`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setExport(null, `Listo en ${((performance.now() - started) / 1000).toFixed(1)} s: ${(entry.size / 1e6).toFixed(1)} MB, descargado y guardado en la biblioteca.`);
+    $("expStatus").dataset.done = "1";
+    loadLibrary();
+  } catch (e) {
+    setExport(null, e.name === "AbortError" ? "Exportación cancelada." : "Error: " + e.message);
+    $("expStatus").dataset.done = "1";
+  } finally {
+    exporting = null;
+    $("export").textContent = exportLabel();
+    refreshUI();
+  }
+});
+
+// ---------- library ----------
+
+async function loadLibrary() {
+  const box = $("library");
+  let list;
+  try {
+    list = await api("/api/reels");
+  } catch (e) {
+    box.innerHTML = "";
+    box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "No se pudo leer la biblioteca: " + e.message }));
+    return;
+  }
+  box.innerHTML = "";
+  if (!list.length) {
+    box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "Todavía no exportaste reels." }));
+    return;
+  }
+  for (const e of list) {
+    const m = e.meta || {};
+    const row = document.createElement("div");
+    row.className = "reel-item";
+    const v = document.createElement("video");
+    v.src = `/api/reels/${e.id}/video#t=${(e.duration * 0.85).toFixed(1)}`; // a frame near the end
+    v.preload = "metadata";
+    v.muted = true;
+    v.title = "Ver";
+    v.addEventListener("click", () => window.open(v.src, "_blank"));
+    const info = document.createElement("div");
+    info.className = "info";
+    const title = document.createElement("strong");
+    title.textContent = (Templates.LIST[m.template]?.name ?? "Reel") + " · " + fmtTime(e.duration);
+    if (!m.audio || m.audio.mode === "none") title.append(Object.assign(document.createElement("span"), { className: "silent-badge", textContent: "🔇 Sin audio" }));
+    const sub = document.createElement("span");
+    sub.textContent = new Date(e.created).toLocaleString() + " · " + (e.size / 1e6).toFixed(1) + " MB" + (m.texts?.title ? " · " + m.texts.title : "");
+    info.append(title, sub);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const dl = Object.assign(document.createElement("a"), { className: "button", href: `/api/reels/${e.id}/video?download=1`, textContent: "Descargar" });
+    const del = Object.assign(document.createElement("button"), { type: "button", textContent: "Borrar" });
+    del.addEventListener("click", async () => {
+      if (!confirm("¿Borrar este reel de la biblioteca?")) return;
+      await api(`/api/reels/${e.id}`, { method: "DELETE" }).catch((err) => alert(err.message));
+      loadLibrary();
+    });
+    const queue = Object.assign(document.createElement("button"), { type: "button", textContent: "A la cola", title: "Copiarlo a la carpeta de publicación" });
+    queue.addEventListener("click", async () => {
+      queue.disabled = true;
+      try {
+        const r = await api(`/api/reels/${e.id}/queue`, { method: "POST" });
+        queue.textContent = "En la cola ✓";
+        queue.title = r.name;
+      } catch (err) {
+        queue.disabled = false;
+        alert("No se pudo: " + err.message);
+      }
+    });
+    if (e.source) {
+      actions.append(Object.assign(document.createElement("a"), { className: "button", href: `reels.html?lib=${e.id}`, textContent: "Editar", title: "Volver a abrirlo con todos sus ajustes" }));
+    }
+    actions.append(queue, dl, del);
+    row.append(v, info, actions);
+    box.append(row);
+  }
+}
+
+refreshUI();
+player.draw();
+loadLibrary();
+
+// ---------- refining a generated version ----------
+
+// reels.html?refine=<name>: a version from the generator, reopened with all
+// its settings to adjust them by hand and save it again over itself.
+// reels.html?edit=<name>: the same, for a reel already in the publishing
+// queue; saving replaces it there (in every queued language).
+// reels.html?lib=<id>: the same, for a reel of the library.
+const query = new URLSearchParams(location.search);
+const EDIT = query.get("edit");
+const LIB = query.get("lib");
+const REFINE = EDIT || LIB || query.get("refine");
+// reels.html?src=<name>: a new source of the generator, made by hand; the
+// reel saved goes to the generated ones, already refined.
+const MANUAL = query.get("src");
+const reelAPI = (name) => (LIB ? "/api/reels/" : EDIT ? "/api/publish/queue/" : "/api/review/") + encodeURIComponent(name);
+const exportLabel = () => (MANUAL ? "Guardar reel" : EDIT ? "Guardar cambios en la cola" : LIB ? "Guardar cambios en la biblioteca" : REFINE ? "Guardar versión refinada" : "Exportar reel (MP4 1080×1920)");
+
+// Load a source from a URL into the editor (a WebM copy if this browser
+// can't play the video).
+async function loadFromURL(url, name, type, kind, compatURL) {
+  const get = async (u, n, t) => {
+    const res = await fetch(u);
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    await loadSource(new File([blob], n, { type: t || blob.type }));
+  };
+  await get(url, name, type);
+  if (!reel.kind && kind === "video" && compatURL) await get(compatURL, name.replace(/\.\w+$/, "") + ".webm", "video/webm");
+  if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
+}
+
+// Put the editor back in the state a reel's record describes. Resolves once
+// its song (if it had one) is back too.
+function restoreRecord(m) {
+  if (m.template) reel.template = m.template;
+  applyBase(true);
+  reel.lang = m.lang || reel.lang;
+  if (m.framing) {
+    reel.framing = { ...reel.framing, ...m.framing };
+    syncFramingInputs();
+  }
+  const p = m.shapes;
+  if (p) {
+    $("shapes").value = p.shapes;
+    for (const b of $("mode").children) b.classList.toggle("on", +b.dataset.value === p.mode);
+    $("alphaAuto").checked = p.alpha === 0;
+    if (p.alpha) $("alpha").value = p.alpha;
+    $("repeat").value = p.repeat;
+    $("inputSize").value = p.inputSize;
+    $("bgAuto").checked = !p.background;
+    if (p.background) $("background").value = p.background;
+  }
+  const a = m.animation || {};
+  if (reel.kind === "image") {
+    for (const [id, key] of [["recOrder", "order"], ["recCurve", "curve"], ["recEffect", "effect"], ["recEffectTime", "effectTime"]]) {
+      if (a[key] !== undefined) $(id).value = a[key];
+    }
+    Picker.refresh();
+  } else {
+    if (a.kfps) $("kfps").value = String(a.kfps);
+    if (a.adapt !== undefined) $("adapt").value = a.adapt;
+    if (a.flow !== undefined) $("videoFlow").checked = a.flow;
+    if (a.interp) $("interp").value = a.interp;
+  }
+  if (m.ending != null) reel.ending = m.ending; // else: the template's base (from applyBase)
+  if (m.durationChoice) {
+    reel.duration = { ...reel.duration, ...m.durationChoice };
+    $("durFree").value = reel.duration.free;
+  }
+  if (reel.kind === "video" && m.source?.portion) setPortion(m.source.portion.start, m.source.portion.end);
+  if (reel.kind === "video" && m.testFrames?.length) {
+    reel.testFrames = m.testFrames.filter((t) => t >= reel.portion.start && t <= reel.portion.end);
+    if (m.testFrame !== undefined) $("testFrame").value = m.testFrame;
+    if (!reel.testFrames.length) reel.testFrames.push(testTime());
+    drawTestFrames();
+  }
+  if (Array.isArray(m.phrases) && m.phrases.length) {
+    reel.phrases = m.phrases.map((ph) => ({ ...ph, text: ph.text ?? "" }));
+  }
+  renderPhrases();
+  $("tBrand").value = m.brand || "";
+  if (m.audio) {
+    if (m.audio.mode === "source" && reel.video?.info.hasAudio) reel.audio.mode = "source";
+    if (m.audio.volume !== undefined) $("volume").value = m.audio.volume;
+    if (m.audio.fadeOut !== undefined) $("fadeOut").value = m.audio.fadeOut;
+  }
+  // Everything restored counts as chosen: switching templates keeps it.
+  reel.touched = new Set([...(m.changedByHand || []), "duration", "shapes", "mode", "build", "phrases"]);
+  // A time for the original other than the template's base: chosen by hand.
+  if (m.ending != null && m.ending !== (Templates.LIST[templateId()]?.base.ending ?? null)) reel.touched.add("ending");
+  setOutro(m.outro);
+  return restoreSong(m.audio);
+}
+
+// The song a reel was saved with (kept by the server: audio.kept).
+async function restoreSong(a) {
+  if (a?.mode !== "file" || !a.kept) return;
+  try {
+    const res = await fetch("/api/reels/files/" + a.kept.split("/").slice(1).map(encodeURIComponent).join("/"));
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const f = new File([blob], a.name || a.kept.split("/").pop(), { type: blob.type });
+    if (reel.audio.url) URL.revokeObjectURL(reel.audio.url);
+    Object.assign(reel.audio, { mode: "file", file: f, url: URL.createObjectURL(f), bank: a.bank ?? null });
+    $("audioName").textContent = f.name + (a.bank ? " (del banco)" : "");
+    $("audioStart").value = a.start ?? 0;
+    drawBank();
+  } catch (e) {
+    $("audioName").textContent = `No se pudo recuperar la canción (${a.name}): volvé a elegirla`;
+  }
+  refreshUI();
+}
+
+// The same reel in every language: the settings are shared, the phrases'
+// texts belong to each language (kept in phrase.texts while refining).
+const refining = { versions: [], lang: null }; // versions: [{ name, lang }]
+
+function showRefineLangs() {
+  $("refineLangs").replaceChildren(...refining.versions.map((v) => {
+    const b = Object.assign(document.createElement("button"), { type: "button", textContent: v.lang.toUpperCase(), title: v.name });
+    b.classList.toggle("on", v.lang === refining.lang);
+    b.addEventListener("click", () => switchLang(v.lang));
+    return b;
+  }));
+}
+
+function switchLang(lang) {
+  if (lang === refining.lang) return;
+  for (const p of reel.phrases) {
+    p.texts = { ...p.texts, [refining.lang]: p.text };
+    if (p.texts[lang] !== undefined) p.text = p.texts[lang];
+  }
+  refining.lang = lang;
+  reel.lang = lang;
+  renderPhrases();
+  showRefineLangs();
+  refreshUI();
+  if (!player.playing) player.draw();
+}
+
+// Texts of another language's record for these phrases, matched by role.
+function alignTexts(lang, others) {
+  const used = new Set();
+  for (const p of reel.phrases) {
+    const k = (others || []).findIndex((o, i) => !used.has(i) && o.role === p.role);
+    if (k < 0) continue;
+    used.add(k);
+    p.texts = { ...p.texts, [lang]: others[k].text ?? "" };
+  }
+}
+
+// Export every language and (if asked) send them all to the queue.
+async function saveRefined(signal) {
+  const start = refining.lang;
+  const saved = [];
+  try {
+    for (const v of refining.versions) {
+      switchLang(v.lang);
+      const comp = composition();
+      if (!comp) throw new Error("el reel no está listo");
+      await encodeAndSend(comp, LIB ? { lib: v.name } : EDIT ? { queue: v.name } : { refine: v.name }, signal, (f, text) =>
+        setExport((saved.length + f) / refining.versions.length, `${v.lang.toUpperCase()} (${saved.length + 1} de ${refining.versions.length}): ${text}`));
+      saved.push(v);
+    }
+  } finally {
+    switchLang(start);
+  }
+  let msg = `Guardado en ${saved.map((v) => v.lang.toUpperCase()).join(", ")}`;
+  if (LIB) {
+    $("refineState").textContent = "· guardado ✓";
+    loadLibrary();
+    return "Guardado en la biblioteca, en lugar del anterior";
+  }
+  if (EDIT) {
+    $("refineState").textContent = "· guardado en la cola ✓";
+    return msg + ", en su lugar de la cola";
+  }
+  if ($("refineQueue").checked) {
+    const queued = [];
+    for (const v of saved) {
+      try {
+        await api(`/api/review/${encodeURIComponent(v.name)}/queue`, { method: "POST" });
+        queued.push(v.lang.toUpperCase());
+      } catch (e) {
+        msg += `. ${v.lang.toUpperCase()} no pasó a la cola: ${e.message}`;
+      }
+    }
+    if (queued.length) msg += ` y en la cola de publicación (${queued.join(", ")})`;
+    $("refineState").textContent = "· guardado y en la cola ✓";
+    $("export").dataset.closed = "1"; // they left Generados: nothing more to save here
+  } else {
+    msg += ". Desde Revisar los podés mandar a la cola";
+    $("refineState").textContent = "· guardado ✓";
+  }
+  return msg;
+}
+
+async function runRefine(name) {
+  $("refineBar").hidden = false;
+  $("refineName").textContent = name;
+  if (EDIT || LIB) {
+    $("refineVerb").textContent = EDIT ? "Editando (en la cola)" : "Editando (de la biblioteca)";
+    $("refineQueueBox").hidden = true;
+    $("refineBack").textContent = EDIT ? "← volver a Publicar" : "← nuevo reel";
+    $("refineBack").href = EDIT ? "publicar.html" : "reels.html";
+  }
+  $("export").textContent = exportLabel();
+  try {
+    const spec = await api(`${reelAPI(name)}/spec`);
+    const tpl = spec.template || spec.settings?.template;
+    $("refineState").textContent = `· ${(spec.lang || spec.settings?.lang || "").toUpperCase()} · ${Templates.LIST[tpl]?.name ?? tpl ?? ""}`;
+    const src = `${reelAPI(name)}/source`;
+    await loadFromURL(src, spec.source.name, spec.source.type, spec.source.kind, null);
+    await restoreRecord(spec.settings || {});
+    // The other languages of the same reel.
+    refining.lang = reel.lang;
+    refining.versions = [{ name, lang: reel.lang }];
+    for (const p of reel.phrases) p.texts = { [reel.lang]: p.text };
+    for (const sib of spec.siblings || []) {
+      refining.versions.push({ name: sib.name, lang: sib.lang });
+      alignTexts(sib.lang, sib.settings?.phrases);
+    }
+    showRefineLangs();
+    $("refineLangs").hidden = $("refineHint").hidden = refining.versions.length < 2; // one language: nothing to switch
+    sendParams();
+    restartLiveSoon(); // the restored framing
+    refreshUI();
+    if (reel.kind === "video") $("generate").click(); // see the reel as it was, then adjust
+  } catch (e) {
+    $("refineState").textContent = "· no se pudo abrir: " + e.message;
+  }
+}
+if (REFINE) runRefine(REFINE);
+
+// ---------- making a new source by hand ----------
+
+async function saveManual(signal) {
+  const comp = composition();
+  if (!comp) throw new Error("el reel no está listo");
+  const { name } = await encodeAndSend(comp, { manual: MANUAL }, signal, setExport);
+  $("refineState").textContent = "· guardado ✓";
+  if (!$("refineQueue").checked) return `Guardado en Generados como ${name}: está en Revisar, listo para mandarlo a la cola`;
+  try {
+    await api(`/api/review/${encodeURIComponent(name)}/queue`, { method: "POST" });
+    $("refineState").textContent = "· guardado y en la cola ✓";
+    return `Guardado y en la cola de publicación (${name})`;
+  } catch (e) {
+    return `Guardado en Generados (${name}), pero no pasó a la cola: ${e.message}. Mandalo desde Revisar`;
+  }
+}
+
+async function runManual(name) {
+  $("refineBar").hidden = false;
+  $("refineVerb").textContent = "Haciendo a mano";
+  $("refineName").textContent = name;
+  $("refineLangs").hidden = $("refineHint").hidden = true;
+  $("refineQueue").nextSibling.textContent = " Al guardar, mandarlo a la cola de publicación";
+  $("refineBack").textContent = "← volver a Generar";
+  $("refineBack").href = "generar.html";
+  $("export").textContent = exportLabel();
+  try {
+    const spec = await api(`/api/auto/inputs/${encodeURIComponent(name)}/spec`);
+    reel.lang = spec.lang || reel.lang;
+    $("refineState").textContent = `· ${spec.kind === "video" ? "video" : "foto"} · ${reel.lang.toUpperCase()}`;
+    await loadFromURL(`/api/auto/inputs/${encodeURIComponent(name)}`, spec.name, spec.type, spec.kind, null);
+  } catch (e) {
+    $("refineState").textContent = "· no se pudo abrir: " + e.message;
+  }
+}
+if (MANUAL) runManual(MANUAL);
+
+// ---------- automatic mode ----------
+
+// reels.html?auto=<job>: the server's generator opens the editor in a
+// headless browser to make one reel by itself, with exactly the same code
+// as by hand: load the source, choose the template (its base), wait for the
+// shapes, export.
+const AUTO = new URLSearchParams(location.search).get("auto");
+if (AUTO) runAuto(AUTO);
+
+async function runAuto(id) {
+  const post = (what, body) => api(`/api/auto/jobs/${id}/${what}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const report = (stage, fraction) => post("progress", { stage, fraction: Math.max(0, Math.min(1, fraction || 0)) }).catch(() => {});
+  const until = async (cond, what, ms, tick) => {
+    const t0 = performance.now();
+    while (!cond()) {
+      if (performance.now() - t0 > ms) throw new Error("tiempo agotado esperando " + what);
+      tick?.();
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  };
+  try {
+    const job = await api(`/api/auto/jobs/${id}`);
+    report("cargando la fuente", 0);
+    const load = async (query, name, type) => {
+      const res = await fetch(`/api/auto/jobs/${id}/source${query}`);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      await loadSource(new File([blob], name, { type: type || blob.type }));
+    };
+    await load("", job.source.name, job.source.type);
+    if (!reel.kind && job.kind === "video") {
+      // This browser can't play it (no H.264?): ask for a WebM copy.
+      report("convirtiendo el video para el navegador", 0);
+      await load("?compat", job.source.name.replace(/\.\w+$/, "") + ".webm", "video/webm");
+    }
+    if (!reel.kind) throw new Error($("stats").textContent || "no se pudo cargar la fuente");
+    if (job.record) {
+      // A copy of a finished reel: all its settings, texts already translated.
+      await restoreRecord(job.record);
+      sendParams();
+    } else {
+      reel.template = job.template;
+      applyBase(true);
+      // With a preset: its settings (and song), then this language's texts.
+      if (job.preset) await restoreRecord({ ...job.preset, template: job.template, lang: job.lang || "es" });
+      // The texts written for this language, by phrase role.
+      reel.lang = job.lang || "es";
+      for (const ph of reel.phrases) {
+        if (job.phrases?.[ph.role] !== undefined) ph.text = job.phrases[ph.role];
+      }
+      renderPhrases();
+    }
+    restartLiveSoon(); // the template may frame differently
+    refreshUI();
+    if (reel.kind === "video") {
+      $("generate").click();
+      await until(() => !reel.generating, "el cálculo del video", 30 * 60e3, () => report("calculando el video", +$("genProgress").value));
+      if (!reel.gen || stale()) throw new Error($("genStatus").textContent || "no se pudo calcular el video");
+    }
+    await until(() => !!composition(), "las formas", 30 * 60e3, () => report("buscando formas", live.count / params().shapes));
+    await encodeAndSend(composition(), { job: id }, undefined, (f, text) => report(text, f));
+  } catch (e) {
+    await post("fail", { error: String(e?.message || e) }).catch(() => {});
+  }
+}
+
+// ---------- presets: saved settings of a template ----------
+
+// A preset is a reel's record without what belongs to one source (framing,
+// portion, test frames): applied to any photo or video of the template.
+let presets = [];
+let presetsKey = null;
+var presetsReady = true;
+
+async function loadPresets() {
+  try {
+    presets = await api("/api/presets");
+  } catch {
+    presets = [];
+  }
+  presetsKey = null;
+  drawPresets();
+}
+
+function presetSettings() {
+  const a = reel.audio;
+  return {
+    v: 1, template: templateId(),
+    durationChoice: { ...reel.duration },
+    shapes: params(),
+    animation: reel.kind === "image" ? buildOpts() : { ...videoOpts(), interp: $("interp").value },
+    ending: reel.ending,
+    changedByHand: [...reel.touched],
+    phrases: reel.phrases.map(({ role, text, from, to, pos, style, extend }) => ({ role, text, from, to, pos, style, ...(extend ? { extend } : {}) })),
+    brand: $("tBrand").value,
+    audio: { mode: a.mode, name: a.mode === "file" ? a.file?.name : null, bank: a.mode === "file" ? a.bank : null, start: audioSource()?.start ?? 0, volume: +$("volume").value, fadeOut: +$("fadeOut").value },
+    outro: outroRecord(),
+  };
+}
+
+async function applyPreset(p) {
+  const m = { ...JSON.parse(JSON.stringify(p.settings)), template: p.template };
+  if (m.audio?.mode === "source" && reel.kind !== "video") m.audio.mode = "none";
+  await restoreRecord(m);
+  // What wasn't changed by hand follows the next template's base, as usual.
+  reel.touched = new Set(m.changedByHand ?? []);
+  reel.preset = p.id;
+  $("presetStatus").textContent = `Preset "${p.name}" aplicado.`;
+  sendParams();
+  presetsKey = null;
+  refreshUI();
+  player.seek(0);
+}
+
+function drawPresets() {
+  const id = templateId();
+  const box = $("presetBox");
+  box.hidden = !reel.kind;
+  if (!reel.kind) return;
+  const mine = presets.filter((p) => p.template === id);
+  // A preset of another template doesn't count once the template changed.
+  const active = mine.some((p) => p.id === reel.preset) ? reel.preset : null;
+  const key = JSON.stringify([id, mine.map((p) => p.id), active]);
+  if (key === presetsKey) return;
+  presetsKey = key;
+  $("presetTpl").textContent = Templates.LIST[id]?.name ?? id;
+  const base = Object.assign(document.createElement("button"), { type: "button", textContent: "Base", title: "La configuración base del template" });
+  base.classList.toggle("on", !active);
+  base.addEventListener("click", () => {
+    reel.preset = null;
+    applyBase(true);
+    $("presetStatus").textContent = "";
+    presetsKey = null;
+    refreshUI();
+    player.seek(0);
+  });
+  $("presets").replaceChildren(base, ...mine.map((p) => {
+    const b = Object.assign(document.createElement("button"), { type: "button", title: `Aplicar "${p.name}"` });
+    b.append(p.name, Object.assign(document.createElement("i"), { textContent: "×", title: "Borrar este preset" }));
+    b.classList.toggle("on", active === p.id);
+    b.addEventListener("click", async (e) => {
+      if (e.target.tagName === "I") {
+        if (!confirm(`¿Borrar el preset "${p.name}"?`)) return;
+        await api(`/api/presets/${p.id}`, { method: "DELETE" }).catch((err) => alert(err.message));
+        if (reel.preset === p.id) reel.preset = null;
+        loadPresets();
+        return;
+      }
+      applyPreset(p).catch((err) => { $("presetStatus").textContent = "No se pudo aplicar: " + err.message; });
+    });
+    return b;
+  }));
+}
+
+$("savePreset").addEventListener("click", async () => {
+  if (!reel.kind) return;
+  const id = templateId(), tpl = Templates.LIST[id]?.name ?? id;
+  const current = presets.find((p) => p.id === reel.preset && p.template === id);
+  const name = prompt(`Nombre del preset para "${tpl}" (si ya existe, se reemplaza):`, current?.name ?? "");
+  if (!name?.trim()) return;
+  const form = new FormData();
+  form.append("template", id);
+  form.append("name", name.trim());
+  form.append("settings", JSON.stringify(presetSettings()));
+  if (reel.audio.mode === "file" && reel.audio.file) form.append("audio", reel.audio.file);
+  try {
+    const p = await api("/api/presets", { method: "POST", body: form });
+    reel.preset = p.id;
+    await loadPresets();
+    $("presetStatus").textContent = `Guardado el preset "${p.name}" de ${tpl}.`;
+  } catch (e) {
+    alert("No se pudo guardar el preset: " + e.message);
+  }
+});
+
+loadPresets();
